@@ -19,27 +19,47 @@ The first milestone is project bootstrap. At this stage, the repository provides
 - project rules
 - architecture boundaries
 - package skeleton
+- CLI entry point (`evalctl version`)
 - documentation entry points
 
 ## Layout
 
 - `AGENTS.md`: AI collaboration and engineering rules
 - `docs/ai/project_brief.md`: project context for coding agents
-- `src/eval_platform/`: future implementation modules
+- `docs/ai/current_status.md`: current implementation status
+- `docs/architecture.md`: system architecture
+- `src/eval_platform/`: implementation modules
 - `tests/`: unit and integration tests
 
 ## Planned Modules
 
-- `eval_platform/artifacts/`
-- `eval_platform/datasets/`
-- `eval_platform/chunking/`
-- `eval_platform/embeddings/`
-- `eval_platform/indexes/`
-- `eval_platform/retrieval/`
-- `eval_platform/mteb_adapter/`
-- `eval_platform/metrics/`
-- `eval_platform/frontend/`
-- `eval_platform/cli/`
+- `src/eval_platform/artifacts/`
+- `src/eval_platform/datasets/`
+- `src/eval_platform/chunking/`
+- `src/eval_platform/embeddings/`
+- `src/eval_platform/indexes/`
+- `src/eval_platform/retrieval/`
+- `src/eval_platform/mteb_adapter/`
+- `src/eval_platform/metrics/`
+- `src/eval_platform/frontend/`
+- `src/eval_platform/cli/`
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+evalctl version
+pytest
+ruff check .
+```
+
+Project rules for AI coding agents are defined in `AGENTS.md`.
+
+Architecture documents are in `docs/`.
+
+## Current Status
+
+See `docs/ai/current_status.md`.
 
 ## Next Step
 

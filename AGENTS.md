@@ -31,7 +31,7 @@ Expected artifact types include:
 
 ## Hard Rules
 
-- Do not create one-off scripts outside `eval_platform/cli/`.
+- Do not create one-off scripts outside `src/eval_platform/cli/`.
 - Every pipeline step must be idempotent.
 - Every output artifact must include `_MANIFEST.json`.
 - Completed artifacts must include `_SUCCESS`.
@@ -48,16 +48,16 @@ Expected artifact types include:
 
 ## Module Boundaries
 
-- `eval_platform/artifacts/`: artifact storage, manifests, checksums, local cache, S3 backend
-- `eval_platform/datasets/`: MTEB dataset loading and normalized schemas
-- `eval_platform/chunking/`: wrapper around sciverse chunking logic
-- `eval_platform/embeddings/`: embedding API client and batch embedding writer
-- `eval_platform/indexes/`: ES and Milvus index builders
-- `eval_platform/retrieval/`: ES recall, Milvus recall, RRF fusion, reranker pipeline
-- `eval_platform/mteb_adapter/`: MTEB SearchProtocol-compatible integration
-- `eval_platform/metrics/`: metric computation and report generation
-- `eval_platform/frontend/`: read-only dashboard
-- `eval_platform/cli/`: official command-line entry points only
+- `src/eval_platform/artifacts/`: artifact storage, manifests, checksums, local cache, S3 backend
+- `src/eval_platform/datasets/`: MTEB dataset loading and normalized schemas
+- `src/eval_platform/chunking/`: wrapper around sciverse chunking logic
+- `src/eval_platform/embeddings/`: embedding API client and batch embedding writer
+- `src/eval_platform/indexes/`: ES and Milvus index builders
+- `src/eval_platform/retrieval/`: ES recall, Milvus recall, RRF fusion, reranker pipeline
+- `src/eval_platform/mteb_adapter/`: MTEB SearchProtocol-compatible integration
+- `src/eval_platform/metrics/`: metric computation and report generation
+- `src/eval_platform/frontend/`: read-only dashboard
+- `src/eval_platform/cli/`: official command-line entry points only
 
 ## Testing Rules
 
