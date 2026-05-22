@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Artifact store PR ready for merge review.
+S3 artifact backend PR ready for merge review.
 
 ## Implemented
 
@@ -14,6 +14,7 @@ Artifact store PR ready for merge review.
 - Artifact manifest schema (`ArtifactManifest`, `ArtifactFile`, `ArtifactDependency`)
 - Artifact store abstract interface (`ArtifactStore`) with `artifact_uri()`
 - Local artifact store (`LocalArtifactStore`) with path safety and manifest consistency checks
+- S3 artifact store (`S3ArtifactStore`) with injectable client for testing
 
 ## In Progress
 
@@ -21,7 +22,6 @@ Nothing.
 
 ## Not Implemented
 
-- S3 artifact backend
 - Dataset adapter
 - Chunking pipeline
 - Embedding pipeline
@@ -39,4 +39,4 @@ Nothing.
 
 ## Next Task
 
-Merge artifact store PR, then start `feat/s3-artifact-store`.
+Open and merge S3 artifact store PR, then start `feat/dataset-schema`.
