@@ -8,4 +8,5 @@ build/
 dist/
 *.egg-info/
 .env
+.local_artifacts/
 .DS_Store

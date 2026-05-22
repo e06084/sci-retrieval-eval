@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Artifact-driven evaluation platform for scientific literature retrieval."
 requires-python = ">=3.11"
 dependencies = [
+    "pydantic>=2.0",
     "typer>=0.12",
 ]
 
