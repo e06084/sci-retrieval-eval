@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-S3 artifact backend PR ready for merge review.
+Normalized dataset schema PR ready for merge review.
 
 ## Implemented
 
@@ -11,10 +11,11 @@ S3 artifact backend PR ready for merge review.
 - Package skeleton under `src/eval_platform/`
 - CLI entry point: `evalctl version`
 - Dev tooling: pytest, ruff, mypy (configured in `pyproject.toml`)
-- Artifact manifest schema (`ArtifactManifest`, `ArtifactFile`, `ArtifactDependency`)
-- Artifact store abstract interface (`ArtifactStore`) with `artifact_uri()`
-- Local artifact store (`LocalArtifactStore`) with path safety and manifest consistency checks
-- S3 artifact store (`S3ArtifactStore`) with injectable client for testing
+- Local artifact store (`LocalArtifactStore`)
+- S3 artifact store (`S3ArtifactStore`)
+- Artifact manifest schema and `ArtifactStore` interface
+- Normalized dataset schema (`CorpusRecord`, `QueryRecord`, `QrelRecord`, `NormalizedDataset`)
+- JSONL helpers and normalized dataset artifact read/write
 
 ## In Progress
 
@@ -22,12 +23,11 @@ Nothing.
 
 ## Not Implemented
 
-- Dataset adapter
+- MTEB dataset adapter
 - Chunking pipeline
 - Embedding pipeline
 - ES/Milvus index builder
 - Retrieval pipeline
-- MTEB adapter
 - Metrics and reports
 - Frontend dashboard
 
@@ -39,4 +39,4 @@ Nothing.
 
 ## Next Task
 
-Open and merge S3 artifact store PR, then start `feat/dataset-schema`.
+Open and merge dataset schema PR, then start `feat/mteb-dataset-adapter`.

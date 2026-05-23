@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -269,12 +270,8 @@ def test_default_client_requires_boto3(monkeypatch: pytest.MonkeyPatch) -> None:
     real_import = builtins.__import__
 
     def guarded_import(
-        name: str,
-        globals: object | None = None,
-        locals: object | None = None,
-        fromlist: object = (),
-        level: int = 0,
-    ) -> object:
+        name: str, globals: Any = None, locals: Any = None, fromlist: Any = (), level: int = 0
+    ) -> Any:
         if name == "boto3":
             raise ImportError("no boto3")
         return real_import(name, globals, locals, fromlist, level)

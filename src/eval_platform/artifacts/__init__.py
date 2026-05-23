@@ -7,6 +7,7 @@ from eval_platform.artifacts.s3 import S3ArtifactStore
 from eval_platform.artifacts.store import (
     MANIFEST_FILENAME,
     SUCCESS_MARKER,
+    ArtifactIncompleteError,
     ArtifactNotFoundError,
     ArtifactStore,
     ArtifactStoreError,
@@ -19,6 +20,7 @@ __all__ = [
     "ArtifactDependency",
     "ArtifactFile",
     "ArtifactManifest",
+    "ArtifactIncompleteError",
     "ArtifactNotFoundError",
     "ArtifactStore",
     "ArtifactStoreError",

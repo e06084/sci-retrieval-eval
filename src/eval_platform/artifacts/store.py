@@ -20,6 +20,10 @@ class ManifestNotFoundError(ArtifactStoreError):
     """Raised when an artifact manifest is missing."""
 
 
+class ArtifactIncompleteError(ArtifactStoreError):
+    """Raised when an artifact is missing _MANIFEST.json or _SUCCESS."""
+
+
 class ArtifactStore(ABC):
     """Storage backend for pipeline artifacts."""
 
