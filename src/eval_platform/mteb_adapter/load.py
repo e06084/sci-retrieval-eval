@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from eval_platform.artifacts.manifest import ArtifactManifest
@@ -69,6 +69,54 @@ def _require_mapping(name: str, data: Any) -> Mapping[str, Any]:
     return data
 
 
+def _rows_to_mapping(data: Any) -> Any:
+    if isinstance(data, Mapping):
+        return data
+    if not isinstance(data, Iterable) or isinstance(data, (str, bytes)):
+        return data
+
+    result: dict[str, Any] = {}
+    for row in data:
+        if not isinstance(row, Mapping):
+            return data
+        row_id = row.get("id")
+        if row_id is None:
+            row_id = row.get("_id")
+        if row_id is None:
+            return data
+        normalized_row = dict(row)
+        normalized_row.pop("id", None)
+        normalized_row.pop("_id", None)
+        result[str(row_id)] = normalized_row
+    return result
+
+
+def _extract_from_dataset_field(
+    task: Any,
+    split: str,
+) -> tuple[Any, Any, Any] | None:
+    dataset = getattr(task, "dataset", None)
+    if not isinstance(dataset, Mapping):
+        return None
+
+    for subset_payload in dataset.values():
+        split_payload = _select_split(subset_payload, split)
+        if not isinstance(split_payload, Mapping):
+            continue
+
+        corpus = _rows_to_mapping(split_payload.get("corpus"))
+        queries = _rows_to_mapping(split_payload.get("queries"))
+        qrels = split_payload.get("relevant_docs")
+        if qrels is None:
+            qrels = split_payload.get("qrels")
+
+        if corpus is None and queries is None and qrels is None:
+            continue
+        return corpus, queries, qrels
+
+    return None
+
+
 def extract_retrieval_data_from_mteb_task(
     task: Any,
     split: str,
@@ -83,6 +131,16 @@ def extract_retrieval_data_from_mteb_task(
     if qrels is None:
         qrels = getattr(task, "qrels", None)
     qrels = _select_split(qrels, split)
+
+    if corpus is None or queries is None or qrels is None:
+        extracted = _extract_from_dataset_field(task, split)
+        if extracted is not None:
+            if corpus is None:
+                corpus = extracted[0]
+            if queries is None:
+                queries = extracted[1]
+            if qrels is None:
+                qrels = extracted[2]
 
     corpus_mapping = _require_mapping("corpus", corpus)
     queries_mapping = _require_mapping("queries", queries)
