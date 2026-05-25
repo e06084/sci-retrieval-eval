@@ -2,20 +2,20 @@
 
 ## Current Phase
 
-MTEB dataset adapter PR ready for merge review.
+Chunking schema PR ready for merge review.
 
 ## Implemented
 
 - Project rules (`AGENTS.md`)
 - Architecture and AI collaboration docs (`docs/`)
-- Package skeleton under `src/eval_platform/`
-- CLI entry point: `evalctl version`
-- Dev tooling: pytest, ruff, mypy (configured in `pyproject.toml`)
 - Local artifact store (`LocalArtifactStore`)
 - S3 artifact store (`S3ArtifactStore`)
-- Artifact manifest schema and `ArtifactStore` interface
-- Normalized dataset schema, JSONL helpers, and artifact read/write
+- Normalized dataset schema and artifact read/write
 - MTEB dataset adapter (convert, load, export)
+- Chunked corpus schema with external chunker provenance metadata
+- Chunk JSONL helpers (`dump_chunks_jsonl`, `load_chunks_jsonl`)
+- Chunked corpus source artifact dependency in manifest
+- ChunkRecord validation and artifact read/write tests
 
 ## In Progress
 
@@ -23,7 +23,7 @@ Nothing.
 
 ## Not Implemented
 
-- Chunking pipeline
+- Chunking runner and external chunker invocation
 - Embedding pipeline
 - ES/Milvus index builder
 - Retrieval pipeline
@@ -32,10 +32,9 @@ Nothing.
 
 ## Current Risks
 
-- AI agents may create unmaintainable scripts if project rules are not strict.
+- External chunker git cleanliness is not enforced until the runner stage.
 - MTEB doc-level evaluation and internal chunk-level evidence evaluation need to be clearly separated.
-- MTEB task APIs may vary across versions; extraction logic must stay defensive.
 
 ## Next Task
 
-Open and merge MTEB dataset adapter PR, then start `feat/chunking-schema`.
+Open and merge chunking schema PR, then start `feat/chunking-runner`.

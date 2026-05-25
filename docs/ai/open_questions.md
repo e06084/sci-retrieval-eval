@@ -25,6 +25,11 @@
 8. Should reranker score replace RRF score for final ranking, or should both scores be preserved?
 9. How many candidates should be reranked by default?
 
+## Chunking
+
+12. Should chunked corpus artifacts always record external chunker provenance, even for local-only experiments?
+13. Should dirty external chunker repositories be rejected at runner time only, or also flagged in manifest metadata?
+
 ## Frontend
 
 10. Should the first frontend be read-only only?
