@@ -28,7 +28,7 @@
 ## Chunking
 
 12. Should chunked corpus artifacts always record external chunker provenance, even for local-only experiments?
-13. Should dirty external chunker repositories be rejected at runner time only, or also flagged in manifest metadata?
+13. Should dirty external chunker repositories be rejected at runner time only, or also flagged in manifest metadata? (Runner currently rejects dirty repos before writing artifacts.)
 
 ## Frontend
 

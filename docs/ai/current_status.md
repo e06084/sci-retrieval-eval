@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Chunking schema PR ready for merge review.
+Chunking runner PR ready for merge review.
 
 ## Implemented
 
@@ -16,6 +16,7 @@ Chunking schema PR ready for merge review.
 - Chunk JSONL helpers (`dump_chunks_jsonl`, `load_chunks_jsonl`)
 - Chunked corpus source artifact dependency in manifest
 - ChunkRecord validation and artifact read/write tests
+- Chunking runner with git clean-state inspection
 
 ## In Progress
 
@@ -23,7 +24,7 @@ Nothing.
 
 ## Not Implemented
 
-- Chunking runner and external chunker invocation
+- Real external chunker adapter
 - Embedding pipeline
 - ES/Milvus index builder
 - Retrieval pipeline
@@ -32,9 +33,9 @@ Nothing.
 
 ## Current Risks
 
-- External chunker git cleanliness is not enforced until the runner stage.
 - MTEB doc-level evaluation and internal chunk-level evidence evaluation need to be clearly separated.
+- External chunker API shape may differ from the injected `ExternalChunker` protocol.
 
 ## Next Task
 
-Open and merge chunking schema PR, then start `feat/chunking-runner`.
+Open and merge chunking runner PR, then start `feat/embedding-schema`.
