@@ -2,42 +2,41 @@
 
 ## 当前阶段
 
-Local + S3 artifact store 已合并到 `main`。`feat/dataset-schema` 上 normalized dataset schema 已完成本地实现，待 PR / merge review。
+Local + S3 artifact store 与 normalized dataset schema 已合并到 `main`。`feat/mteb-dataset-adapter` 上 MTEB dataset adapter 已完成本地实现，待 PR / merge review。
 
 ## 已完成事项（main）
 
 - bootstrap 基线与项目协作规则
 - Local artifact store + S3 artifact store
-- `ArtifactManifest` / `ArtifactStore` 基础层
+- normalized dataset schema + JSONL artifact 读写
 
-## 已完成事项（feat/dataset-schema）
+## 已完成事项（feat/mteb-dataset-adapter）
 
-- normalized dataset schema（`CorpusRecord` / `QueryRecord` / `QrelRecord` / `NormalizedDataset`）
-- JSONL 读写（`dump_jsonl` / `load_jsonl`）
-- normalized dataset artifact 读写（`write_normalized_dataset_artifact` / `read_normalized_dataset_artifact`）
-- `ArtifactIncompleteError`
-- manifest count metadata 防覆盖
-- 拒绝纯空白 id/text
-- ADR：`docs/decisions/0002-normalized-dataset-schema.md`
-- `tests/datasets/` 单元测试
+- MTEB retrieval task → `NormalizedDataset` 转换
+- MTEB task 加载与 artifact 导出
+- defensive `load_data` fallback
+- export manifest 系统字段防覆盖
+- `[mteb]` optional dependency
+- ADR：`docs/decisions/0003-mteb-dataset-adapter.md`
+- `tests/mteb_adapter/` 单元测试（fake task，不下载真实数据）
 
 ## 本 PR 范围
 
-- 只实现 normalized dataset schema 和 JSONL artifact 读写
-- 不包含 MTEB 下载 / adapter / ES / Milvus / embedding / retrieval
+- 只实现 MTEB retrieval task 到 normalized dataset artifact 的转换
+- 不包含 chunking / embedding / ES / Milvus / retrieval / metrics
 
 ## 已验证事项
 
-- 测试不访问真实 S3 或网络
+- 测试不访问真实 MTEB 数据或网络
 - 无硬编码 endpoint / bucket / API key / token
 - `pytest` / `ruff check .` 通过
 
 ## 当前结论
 
-- dataset schema 功能完整，可进入 PR / merge review
-- 合并后下一步：`feat/mteb-dataset-adapter`
+- MTEB adapter 功能完整，可进入 PR / merge review
+- 合并后下一步：`feat/chunking-schema`
 
 ## 建议下一阶段目标
 
-- 实现 MTEB dataset adapter，把 MTEB 原始结构转换为 normalized dataset artifact
+- 定义 chunking schema 与 chunk artifact 格式
 - 继续保持小 PR、不引入 Redis / SQL / Airflow

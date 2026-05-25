@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Normalized dataset schema PR ready for merge review.
+MTEB dataset adapter PR ready for merge review.
 
 ## Implemented
 
@@ -14,8 +14,8 @@ Normalized dataset schema PR ready for merge review.
 - Local artifact store (`LocalArtifactStore`)
 - S3 artifact store (`S3ArtifactStore`)
 - Artifact manifest schema and `ArtifactStore` interface
-- Normalized dataset schema (`CorpusRecord`, `QueryRecord`, `QrelRecord`, `NormalizedDataset`)
-- JSONL helpers and normalized dataset artifact read/write
+- Normalized dataset schema, JSONL helpers, and artifact read/write
+- MTEB dataset adapter (convert, load, export)
 
 ## In Progress
 
@@ -23,7 +23,6 @@ Nothing.
 
 ## Not Implemented
 
-- MTEB dataset adapter
 - Chunking pipeline
 - Embedding pipeline
 - ES/Milvus index builder
@@ -35,8 +34,8 @@ Nothing.
 
 - AI agents may create unmaintainable scripts if project rules are not strict.
 - MTEB doc-level evaluation and internal chunk-level evidence evaluation need to be clearly separated.
-- Manifest schema evolution must remain backward compatible via `schema_version`.
+- MTEB task APIs may vary across versions; extraction logic must stay defensive.
 
 ## Next Task
 
-Open and merge dataset schema PR, then start `feat/mteb-dataset-adapter`.
+Open and merge MTEB dataset adapter PR, then start `feat/chunking-schema`.

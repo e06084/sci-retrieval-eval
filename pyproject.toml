@@ -17,6 +17,9 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.0",
 ]
+mteb = [
+    "mteb>=2.0.0",
+]
 
 [project.scripts]
 evalctl = "eval_platform.cli.main:app"
