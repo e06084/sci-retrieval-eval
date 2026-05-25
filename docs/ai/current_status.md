@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Chunking runner PR ready for merge review.
+Version-pinned external chunker adapter / Sciverse admin-ingest adapter completed locally and pending PR / merge review.
 
 ## Implemented
 
@@ -17,14 +17,16 @@ Chunking runner PR ready for merge review.
 - Chunked corpus source artifact dependency in manifest
 - ChunkRecord validation and artifact read/write tests
 - Chunking runner with git clean-state inspection
+- Version-pinned external chunker adapter
+- Sciverse admin-ingest thin adapter with version-pinned repo checks
 
 ## In Progress
 
-Nothing.
+- PR / merge review
+- Real `sciverse_clean` smoke validation
 
 ## Not Implemented
 
-- Real external chunker adapter
 - Embedding pipeline
 - ES/Milvus index builder
 - Retrieval pipeline
@@ -34,8 +36,8 @@ Nothing.
 ## Current Risks
 
 - MTEB doc-level evaluation and internal chunk-level evidence evaluation need to be clearly separated.
-- External chunker API shape may differ from the injected `ExternalChunker` protocol.
+- `sciverse_clean` 真实输出字段可能与 fake repo 测试 still differ，需要再做一次真实 smoke。
 
 ## Next Task
 
-Open and merge chunking runner PR, then start `feat/embedding-schema`.
+Open and merge the Sciverse-path adapter PR, then start `feat/embedding-schema`.
