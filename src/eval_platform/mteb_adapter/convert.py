@@ -22,6 +22,9 @@ def _corpus_text_from_mapping(payload: Mapping[str, Any]) -> str | None:
     abstract = payload.get("abstract")
     if isinstance(abstract, str) and abstract.strip():
         return abstract
+    title = payload.get("title")
+    if isinstance(title, str) and title.strip():
+        return title
     return None
 
 

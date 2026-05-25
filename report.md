@@ -2,112 +2,152 @@
 
 ## 当前阶段
 
-`main` 已具备 artifact store、S3 backend、dataset schema、MTEB adapter、chunking schema 和 chunking runner。当前分支上的 version-pinned external chunker adapter / Sciverse admin-ingest adapter 已完成本地实现，并已通过真实 `MTEB -> normalized_dataset -> real sciverse chunk -> S3` smoke，待 PR / merge review。
-
-## 已完成事项（main）
-
-- Local + S3 artifact store
-- normalized dataset schema + JSONL artifact 读写
-- MTEB dataset adapter
-- chunked corpus schema + `ChunkerProvenance` + artifact IO
-- `inspect_git_repo` / `ensure_git_repo_clean`
-- `ChunkingRunConfig` / `run_chunking` + injectable `ExternalChunker`
-- MTEB 新 layout 兼容修复
-- 真实 `IFIRNFCorpus` MTEB -> normalized_dataset -> fake chunk 本地/S3 smoke 验证
+`main` 已具备 artifact store、S3 backend、normalized dataset schema、MTEB adapter、chunking schema、chunking runner、version-pinned external chunker adapter 和 Sciverse admin-ingest adapter。当前分支 `feat/mteb-normalizer-registry` 在此基础上把 MTEB normalization 改成 per-dataset normalizer registry，并已完成 5 个目标任务的真实 normalization smoke，待 PR / merge review。
 
 ## 本次开发
 
-- 保留并复用现有 version-pinned external repo 校验：
-  - remote URL
-  - commit SHA
-  - clean state
-- 新增 `SciverseAdminIngestChunkerConfig`
-- 新增 `SciverseAdminIngestExternalChunker`
-- 新增 `run_version_pinned_sciverse_chunking(...)`
-- 通过动态导入 `<repo>/python_services/admin-ingest`，把外部 repo 的 `chunk_ndjson_records(...)` 接入当前 `run_chunking(...)`
-- 修复真实 `sciverse_clean` 兼容问题：
-  - `source_type` / `file_ext` 不再传给 `RecursiveChunkOptions`
-  - 这两个字段仍保留在 manifest `chunk_params` 中，作为运行语义记录
-- 保持 provenance / dependency / manifest 统一收口
-- 不实现 embedding / ES / Milvus / retrieval / metrics
+- 新增 `mteb_adapter/base.py`
+  - 放置 `MTEBTaskNormalizer`
+  - 放置共享 task load / split select / dataset-field extract helpers
+- 新增 `mteb_adapter/registry.py`
+  - 明确注册 5 个目标任务的 normalizer
+- 新增 `mteb_adapter/normalizers/`
+  - `scifact.py`
+  - `nfcorpus.py`
+  - `ifir_scifact.py`
+  - `ifir_nfcorpus.py`
+  - `litsearch.py`
+- 保持统一输出：
+  - `CorpusRecord`
+  - `QueryRecord`
+  - `QrelRecord`
+  - `NormalizedDataset`
+- 保持统一 artifact writer：
+  - `write_normalized_dataset_artifact(...)`
+- 保持外部 API 基本稳定：
+  - `load_mteb_retrieval_dataset(...)`
+  - `export_mteb_retrieval_dataset_artifact(...)`
+  - `extract_retrieval_data_from_mteb_task(...)`
 
-## 已验证事项
+## LitSearch 专用规则
 
-- `pytest tests/chunking/test_external_repo.py tests/chunking/test_external_adapter.py tests/chunking/test_external_chunking_runner.py tests/chunking/test_sciverse_adapter.py` 通过
-- `ruff check src/eval_platform/chunking tests/chunking` 通过
-- `mypy src/eval_platform/chunking tests/chunking` 通过
-- 新增 fake `sciverse` repo 测试覆盖：
-  - 动态导入 `python_services/admin-ingest`
-  - `NormalizedDataset -> NDJSON -> chunk_ndjson_records -> ChunkRecord`
-  - version-pinned helper 写出 `chunked_corpus` artifact
-  - dependency、repo provenance、chunk params 正确落入 manifest
-- 通用 `PythonCallableExternalChunker` 已补 `sys.modules` 隔离：
-  - 不同 repo 的同名 module 不再串用
-  - 缺失 module 错误路径已覆盖
+`LitSearchRetrieval` 的真实 MTEB 数据中存在大量无效 corpus 行：
 
-## 真实 smoke 结果
+- 一类是：
+  - `{"title": "IMPLICIT NORMALIZING FLOWS", "text": ""}`
+- 另一类是：
+  - `{"title": "", "text": ""}`
 
-- 使用配置文件：
-  - `/home/qiujiuantao/codex_project/sci-base/sciverse_benchmark/config.yaml`
-- 使用真实外部 repo：
-  - `/home/qiujiuantao/codex_project/sci-base/sciverse_clean/agentic-search`
-- 外部 repo 版本：
-  - remote URL: `git@gitlab.shlab.tech:sciverse/sciverse.git`
-  - commit SHA: `e0b52937a59ce93162466e9178a5deda4c8800b5`
-  - branch: `chunk_exp`
-  - clean state: `true`
-- 本次测试前缀：
-  - `s3://scibase-service/sciverse_benchmark/test/sci-retrieval-eval/20260525_155519_sciverse_path_smoke/`
+基于真实数据检查，当前分支对 `LitSearchRetrieval` 采用显式 normalizer 规则：
+
+- 当 `text` / `abstract` 都为空但 `title` 非空时：
+  - 允许回退到 `title` 作为 `CorpusRecord.text`
+- 当 `text` / `abstract` / `title` 都为空时：
+  - 丢弃该空文档
+- 同时：
+  - 从 qrels 中移除指向空文档的引用
+  - 移除清洗后不再拥有任何 qrels 的 query
+
+这部分规则只存在于 `LitSearchRetrievalNormalizer`，不污染其他数据集。
+
+## 单元测试
+
+已新增 / 更新：
+
+- `tests/mteb_adapter/test_convert.py`
+  - title-only corpus 行可被转成有效 `CorpusRecord`
+- `tests/mteb_adapter/test_registry.py`
+  - registry 包含 5 个显式 normalizer
+  - `load_mteb_retrieval_dataset(...)` 会分发到注册 normalizer
+- `tests/mteb_adapter/test_load.py`
+  - `extract_retrieval_data_from_mteb_task(...)` 在 task name 已知时走 registry `extract_raw()`
+- `tests/mteb_adapter/test_normalizers.py`
+  - `LitSearchRetrievalNormalizer` 会移除空文档、空引用和 orphan queries
+
+## 真实 5-task normalization smoke
+
+本次真实 smoke 目录：
+
+- `.local_artifacts/test/mteb_norm_all_20260525_164656_c67132a/`
+
+报告文件：
+
+- `.local_artifacts/test/mteb_norm_all_20260525_164656_c67132a/normalization_report.json`
+- `.local_artifacts/test/mteb_norm_all_20260525_164656_c67132a/normalization_report.md`
+
+### LitSearchRetrieval
+
+- status: `success`
+- corpus_count: `57986`
+- query_count: `593`
+- qrel_count: `634`
+- title_non_empty_count: `57423`
+- empty_doc_id_count: `0`
+- empty_text_count: `0`
+- duplicate_doc_id_count: `0`
+- qrels_query_missing_from_queries_count: `0`
+- qrels_doc_missing_from_corpus_count: `0`
+- manifest metadata:
+  - `normalizer_name = LitSearchRetrievalNormalizer`
 
 ### SciFact
 
-- normalized counts:
-  - corpus: `5183`
-  - queries: `300`
-  - qrels: `339`
-- chunked count:
-  - `16120`
-- artifact 完整性：
-  - `normalized_dataset`: complete
-  - `chunked_corpus`: complete
-- 与 `sciverse_benchmark` 历史结果对比：
-  - formatted doc_count: `5183`
-  - chunk output_chunk_count: `16120`
-  - 结论：完全一致
-- 历史对比 manifest：
-  - `sciverse_benchmark/corpus/scifact/formatted/manifest.json`
-  - `sciverse_benchmark/corpus/scifact/chunks/e0b529_704f06/manifest.json`
+- status: `success`
+- corpus_count: `5183`
+- query_count: `300`
+- qrel_count: `339`
+- qrels_query_missing_from_queries_count: `0`
+- qrels_doc_missing_from_corpus_count: `0`
+- manifest metadata:
+  - `normalizer_name = SciFactNormalizer`
+
+### IFIRScifact
+
+- status: `success`
+- corpus_count: `500000`
+- query_count: `135`
+- qrel_count: `735`
+- qrels_query_missing_from_queries_count: `0`
+- qrels_doc_missing_from_corpus_count: `0`
+- manifest metadata:
+  - `normalizer_name = IFIRScifactNormalizer`
 
 ### IFIRNFCorpus
 
-- normalized counts:
-  - corpus: `3633`
-  - queries: `86`
-  - qrels: `242`
-- chunked count:
-  - `11962`
-- artifact 完整性：
-  - `normalized_dataset`: complete
-  - `chunked_corpus`: complete
-- 与 `sciverse_benchmark` 历史结果对比：
-  - formatted doc_count: `3633`
-  - chunk output_chunk_count: `11958`
-  - 结论：doc 数一致，chunk 数多 `4`
-- 对比解释：
-  - 历史 `sciverse_benchmark` chunk manifest 使用的外部 commit 是 `820da4242ee72c85bd8eb2d77ba11889a2b833ce`
-  - 本次 smoke 使用的外部 commit 是 `e0b52937a59ce93162466e9178a5deda4c8800b5`
-  - 因此这更像 external chunker 版本差异，不是当前 `sci-retrieval-eval` 流程错误
-- 历史对比 manifest：
-  - `sciverse_benchmark/corpus/nfcorpus__ifir_candidate/formatted/manifest.json`
-  - `sciverse_benchmark/corpus/nfcorpus__ifir_candidate/chunks/820da4_704f06/manifest.json`
+- status: `success`
+- corpus_count: `3633`
+- query_count: `86`
+- qrel_count: `242`
+- qrels_query_missing_from_queries_count: `0`
+- qrels_doc_missing_from_corpus_count: `0`
+- manifest metadata:
+  - `normalizer_name = IFIRNFCorpusNormalizer`
 
-## 当前限制
+### NFCorpus
 
-- 仍未直接提供用户界面的 `SCIVERSE_PATH` 命令入口；当前是库级 adapter
-- 不自动 `git fetch` 或 `git checkout`
-- 用户必须事先准备好正确的外部 repo checkout
+- status: `success`
+- corpus_count: `3633`
+- query_count: `323`
+- qrel_count: `12334`
+- qrels_query_missing_from_queries_count: `0`
+- qrels_doc_missing_from_corpus_count: `0`
+- manifest metadata:
+  - `normalizer_name = NFCorpusNormalizer`
+
+## 结论
+
+- 5 个目标任务现在都能完成：
+  - `load_mteb_task(...)`
+  - `extract_retrieval_data_from_mteb_task(...)`
+  - `convert_retrieval_data_to_normalized_dataset(...)`
+  - `write_normalized_dataset_artifact(...)`
+  - `read_normalized_dataset_artifact(...)`
+- 当前 registry 设计比继续堆通用 fallback 更可解释：
+  - 每个目标任务有显式 normalizer
+  - 后续如果单个数据集 layout 演进，只改对应 normalizer
+- 后续 chunk / embedding / index / retrieval 继续只消费统一 `NormalizedDataset` artifact
 
 ## 建议后续方向
 
-- 合并这条 `sciverse` adapter 分支
+- 合并 `feat/mteb-normalizer-registry`
 - 然后开始 `feat/embedding-schema`

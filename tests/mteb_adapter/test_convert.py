@@ -45,10 +45,21 @@ def test_corpus_dict_uses_abstract_when_text_missing() -> None:
     assert dataset.corpus[0].text == "Abstract body"
 
 
-def test_corpus_dict_without_text_or_abstract_raises() -> None:
+def test_corpus_dict_uses_title_when_text_and_abstract_missing() -> None:
+    dataset = convert_retrieval_data_to_normalized_dataset(
+        corpus={"doc-1": {"title": "Title only"}},
+        queries={"q-1": "query"},
+        qrels={"q-1": {"doc-1": 1}},
+    )
+
+    assert dataset.corpus[0].title == "Title only"
+    assert dataset.corpus[0].text == "Title only"
+
+
+def test_corpus_dict_without_text_abstract_or_title_raises() -> None:
     with pytest.raises(MTEBConversionError, match="no text or abstract"):
         convert_retrieval_data_to_normalized_dataset(
-            corpus={"doc-1": {"title": "Title"}},
+            corpus={"doc-1": {"venue": "Conference"}},
             queries={"q-1": "query"},
             qrels={"q-1": {"doc-1": 1}},
         )

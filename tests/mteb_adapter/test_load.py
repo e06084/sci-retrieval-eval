@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from eval_platform.mteb_adapter import MTEBAdapterError, extract_retrieval_data_from_mteb_task
+from eval_platform.mteb_adapter.registry import NORMALIZER_REGISTRY
 
 
 class SplitAwareFakeTask:
@@ -153,6 +154,18 @@ class MultiSubsetDatasetFieldTask:
         return None
 
 
+class NamedTaskForRegistryDispatch:
+    def __init__(self) -> None:
+        self.metadata = SimpleNamespace(name="LitSearchRetrieval")
+
+
+class RegistryDispatchNormalizer:
+    task_name = "LitSearchRetrieval"
+
+    def extract_raw(self, task: object, split: str):
+        return {"doc-1": {"text": "Body"}}, {"q-1": "query text"}, {"q-1": {"doc-1": 1}}
+
+
 def test_extract_from_split_aware_task() -> None:
     task = SplitAwareFakeTask()
 
@@ -274,4 +287,17 @@ def test_extract_from_first_subset_with_matching_split_and_fields() -> None:
 
     assert corpus == {"doc-1": {"text": "Body"}}
     assert queries == {"q-1": {"text": "query text"}}
+    assert qrels == {"q-1": {"doc-1": 1}}
+
+
+def test_extract_dispatches_to_registered_normalizer_when_task_name_is_known(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = NamedTaskForRegistryDispatch()
+    monkeypatch.setitem(NORMALIZER_REGISTRY, "LitSearchRetrieval", RegistryDispatchNormalizer())
+
+    corpus, queries, qrels = extract_retrieval_data_from_mteb_task(task, split="test")
+
+    assert corpus == {"doc-1": {"text": "Body"}}
+    assert queries == {"q-1": "query text"}
     assert qrels == {"q-1": {"doc-1": 1}}
