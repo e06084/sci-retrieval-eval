@@ -13,6 +13,7 @@ from eval_platform.embeddings import (
     EMBEDDINGS_ARTIFACT_TYPE,
     EMBEDDINGS_FILENAME,
     EmbeddedCorpus,
+    EmbeddingConsistencyCheckResult,
     EmbeddingRunConfig,
     EmbeddingRunError,
     FakeEmbeddingClient,
@@ -160,7 +161,18 @@ def test_run_embedding_records_provenance_metadata(
     source_store: LocalArtifactStore,
     output_store: LocalArtifactStore,
 ) -> None:
-    manifest = run_embedding(source_store, output_store, _config(), FakeEmbeddingClient(3))
+    config = _config()
+    config.endpoint_id = "endpoint-a"
+    config.endpoint_ids = ["endpoint-a", "endpoint-b"]
+    config.batch_size = 8
+    config.timeout_seconds = 60.0
+    config.consistency_check = EmbeddingConsistencyCheckResult(
+        input_text="probe text",
+        endpoint_ids=["endpoint-a", "endpoint-b"],
+        passed=True,
+        max_abs_diff=0.0,
+    )
+    manifest = run_embedding(source_store, output_store, config, FakeEmbeddingClient(3))
 
     provenance = manifest.metadata["provenance"]
     assert provenance["model_name"] == "fake-embedding-model"
@@ -168,6 +180,11 @@ def test_run_embedding_records_provenance_metadata(
     assert provenance["api_version"] == "v1"
     assert provenance["embedding_dim"] == 3
     assert provenance["normalized"] is True
+    assert provenance["endpoint_id"] == "endpoint-a"
+    assert provenance["endpoint_ids"] == ["endpoint-a", "endpoint-b"]
+    assert provenance["consistency_check"]["passed"] is True
+    assert provenance["runtime_parameters"]["batch_size"] == 8
+    assert provenance["runtime_parameters"]["timeout_seconds"] == 60.0
     assert manifest.metadata["embedding_count"] == 2
     assert manifest.metadata["unique_chunk_count"] == 2
     assert manifest.metadata["unique_doc_count"] == 2
@@ -224,3 +241,60 @@ def test_run_embedding_raises_for_wrong_vector_dimension(
         "litsearch_embeddings",
         EMBEDDINGS_FILENAME,
     )
+
+
+def test_run_embedding_raises_when_consistency_check_failed(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    config = _config()
+    config.endpoint_ids = ["endpoint-a", "endpoint-b"]
+    config.consistency_check = EmbeddingConsistencyCheckResult(
+        input_text="probe text",
+        endpoint_ids=["endpoint-a", "endpoint-b"],
+        passed=False,
+        failure_reason="endpoint mismatch",
+        max_abs_diff=0.1,
+    )
+
+    with pytest.raises(EmbeddingRunError, match="consistency check failed"):
+        run_embedding(source_store, output_store, config, FakeEmbeddingClient(3))
+
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "litsearch_embeddings") is False
+    assert not output_store.exists(
+        EMBEDDINGS_ARTIFACT_TYPE,
+        "litsearch_embeddings",
+        EMBEDDINGS_FILENAME,
+    )
+
+
+def test_run_embedding_raises_when_multi_endpoint_check_missing(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    config = _config()
+    config.endpoint_ids = ["endpoint-a", "endpoint-b"]
+
+    with pytest.raises(EmbeddingRunError, match="require a consistency_check result"):
+        run_embedding(source_store, output_store, config, FakeEmbeddingClient(3))
+
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "litsearch_embeddings") is False
+    assert not output_store.exists(
+        EMBEDDINGS_ARTIFACT_TYPE,
+        "litsearch_embeddings",
+        EMBEDDINGS_FILENAME,
+    )
+
+
+def test_run_embedding_allows_single_endpoint_without_consistency_check(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    config = _config()
+    config.endpoint_id = "endpoint-a"
+    config.endpoint_ids = ["endpoint-a"]
+
+    manifest = run_embedding(source_store, output_store, config, FakeEmbeddingClient(3))
+
+    assert manifest.artifact_id == "litsearch_embeddings"
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "litsearch_embeddings") is True

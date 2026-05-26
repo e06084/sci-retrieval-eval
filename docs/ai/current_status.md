@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Post-embedding artifact baseline; preparing embedding consistency hardening.
+Embedding consistency hardening ready for merge review.
 
 ## Implemented
 
@@ -15,14 +15,16 @@ Post-embedding artifact baseline; preparing embedding consistency hardening.
 - Embedding runner with injectable client and separate source/output stores
 - HTTP embedding client
 - HTTP embedding request payload fix merged on `main`
+- Multi-endpoint embedding config
+- Multi-endpoint embedding consistency pre-check helper
+- Embedding provenance endpoint and consistency metadata
 
 ## In Progress
 
-- Embedding consistency hardening planning
+- None for the current phase
 
 ## Not Implemented
 
-- Real embedding API client
 - Milvus index builder
 - ES index builder
 - Retrieval pipeline
@@ -30,4 +32,4 @@ Post-embedding artifact baseline; preparing embedding consistency hardening.
 - Frontend dashboard
  
 ## Next Task
-Harden embedding stage, especially multi-endpoint consistency checks, before starting ES / Milvus ingest artifacts.
+Open and merge embedding consistency hardening PR, then start ES / Milvus ingest artifact identity work.

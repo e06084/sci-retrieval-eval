@@ -5,7 +5,12 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from eval_platform.embeddings import EmbeddedCorpus, EmbeddingProvenance, EmbeddingRecord
+from eval_platform.embeddings import (
+    EmbeddedCorpus,
+    EmbeddingConsistencyCheckResult,
+    EmbeddingProvenance,
+    EmbeddingRecord,
+)
 
 
 def test_embedding_provenance_constructs() -> None:
@@ -15,10 +20,22 @@ def test_embedding_provenance_constructs() -> None:
         api_version="2026-01-01",
         embedding_dim=3072,
         normalized=True,
+        endpoint_id="endpoint-a",
+        endpoint_ids=["endpoint-a", "endpoint-b"],
+        consistency_check=EmbeddingConsistencyCheckResult(
+            input_text="probe text",
+            endpoint_ids=["endpoint-a", "endpoint-b"],
+            passed=True,
+            max_abs_diff=0.0,
+        ),
+        runtime_parameters={"batch_size": 8, "timeout_seconds": 60.0},
     )
 
     assert provenance.model_name == "text-embedding-3-large"
     assert provenance.embedding_dim == 3072
+    assert provenance.endpoint_id == "endpoint-a"
+    assert provenance.endpoint_ids == ["endpoint-a", "endpoint-b"]
+    assert provenance.runtime_parameters["batch_size"] == 8
 
 
 @pytest.mark.parametrize("value", ["", " "])
@@ -40,6 +57,110 @@ def test_embedding_provenance_default_metadata_not_shared() -> None:
     second.metadata["x"] = 2
     assert first.metadata == {"x": 1}
     assert second.metadata == {"x": 2}
+
+
+def test_embedding_provenance_default_collections_not_shared() -> None:
+    first = EmbeddingProvenance(model_name="a", embedding_dim=3)
+    second = EmbeddingProvenance(model_name="b", embedding_dim=3)
+    first.endpoint_ids.append("endpoint-a")
+    first.runtime_parameters["batch_size"] = 8
+    second.endpoint_ids.append("endpoint-b")
+    second.runtime_parameters["batch_size"] = 16
+    assert first.endpoint_ids == ["endpoint-a"]
+    assert second.endpoint_ids == ["endpoint-b"]
+    assert first.runtime_parameters == {"batch_size": 8}
+    assert second.runtime_parameters == {"batch_size": 16}
+
+
+@pytest.mark.parametrize("value", ["", " "])
+def test_embedding_provenance_rejects_blank_endpoint_id(value: str) -> None:
+    with pytest.raises(ValidationError):
+        EmbeddingProvenance(model_name="model", embedding_dim=3, endpoint_id=value)
+
+
+def test_embedding_provenance_rejects_blank_endpoint_ids() -> None:
+    with pytest.raises(ValidationError):
+        EmbeddingProvenance(model_name="model", embedding_dim=3, endpoint_ids=["endpoint-a", " "])
+
+
+def test_embedding_consistency_check_result_constructs() -> None:
+    result = EmbeddingConsistencyCheckResult(
+        input_text="probe text",
+        endpoint_ids=["endpoint-a", "endpoint-b"],
+        passed=True,
+        max_abs_diff=0.0,
+    )
+    assert result.passed is True
+    assert result.endpoint_ids == ["endpoint-a", "endpoint-b"]
+
+
+def test_embedding_consistency_check_result_rejects_failure_reason_when_passed() -> None:
+    with pytest.raises(ValidationError):
+        EmbeddingConsistencyCheckResult(
+            input_text="probe text",
+            endpoint_ids=["endpoint-a"],
+            passed=True,
+            failure_reason="should not be here",
+        )
+
+
+@pytest.mark.parametrize("value", [None, "", " "])
+def test_embedding_consistency_check_result_requires_failure_reason_when_failed(
+    value: str | None,
+) -> None:
+    with pytest.raises(ValidationError):
+        EmbeddingConsistencyCheckResult(
+            input_text="probe text",
+            endpoint_ids=["endpoint-a"],
+            passed=False,
+            failure_reason=value,
+        )
+
+
+@pytest.mark.parametrize("value", ["", " "])
+def test_embedding_consistency_check_result_rejects_blank_input_text(value: str) -> None:
+    with pytest.raises(ValidationError):
+        EmbeddingConsistencyCheckResult(
+            input_text=value,
+            endpoint_ids=["endpoint-a"],
+            passed=True,
+        )
+
+
+def test_embedding_consistency_check_result_rejects_empty_endpoint_ids() -> None:
+    with pytest.raises(ValidationError):
+        EmbeddingConsistencyCheckResult(
+            input_text="probe text",
+            endpoint_ids=[],
+            passed=False,
+        )
+
+
+def test_embedding_consistency_check_result_default_metadata_not_shared() -> None:
+    first = EmbeddingConsistencyCheckResult(
+        input_text="probe text",
+        endpoint_ids=["endpoint-a"],
+        passed=True,
+    )
+    second = EmbeddingConsistencyCheckResult(
+        input_text="probe text",
+        endpoint_ids=["endpoint-b"],
+        passed=True,
+    )
+    first.metadata["x"] = 1
+    second.metadata["x"] = 2
+    assert first.metadata == {"x": 1}
+    assert second.metadata == {"x": 2}
+
+
+def test_embedding_consistency_check_result_trims_failure_reason() -> None:
+    result = EmbeddingConsistencyCheckResult(
+        input_text="probe text",
+        endpoint_ids=["endpoint-a"],
+        passed=False,
+        failure_reason="  failed  ",
+    )
+    assert result.failure_reason == "failed"
 
 
 def test_embedding_record_constructs() -> None:

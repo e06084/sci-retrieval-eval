@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -11,9 +12,12 @@ from pydantic import ValidationError
 
 from eval_platform.embeddings import (
     EmbeddingClientError,
+    EmbeddingConsistencyTolerance,
     HTTPEmbeddingClient,
     HTTPEmbeddingClientConfig,
+    MultiEndpointEmbeddingConfig,
     http_embedding_client_from_env,
+    run_embedding_consistency_check,
 )
 
 
@@ -38,6 +42,34 @@ class RecordingTransport:
             }
         )
         return self._responses[len(self.calls) - 1]
+
+
+class StaticEmbeddingClient:
+    def __init__(self, vector: list[float]) -> None:
+        self._vector = vector
+
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        return [list(self._vector) for _ in texts]
+
+
+class FailingEmbeddingClient:
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        raise EmbeddingClientError("boom")
+
+
+class EmptyVectorEmbeddingClient:
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[] for _ in texts]
+
+
+class NonFiniteEmbeddingClient:
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[0.1, math.inf] for _ in texts]
+
+
+class NonNumericEmbeddingClient:
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        return [["bad"] for _ in texts]  # type: ignore[list-item]
 
 
 def test_http_embedding_client_config_constructs() -> None:
@@ -71,6 +103,25 @@ def test_http_embedding_client_config_default_headers_not_shared() -> None:
     second.headers["X-Test"] = "b"
     assert first.headers == {"X-Test": "a"}
     assert second.headers == {"X-Test": "b"}
+
+
+def test_multi_endpoint_embedding_config_constructs() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(endpoint_url="https://example.com/a", endpoint_id="a"),
+            HTTPEmbeddingClientConfig(endpoint_url="https://example.com/b", endpoint_id="b"),
+        ],
+        require_consistency_check=True,
+        consistency_tolerance=EmbeddingConsistencyTolerance(max_abs_diff=1e-6),
+    )
+    assert len(config.endpoints) == 2
+    assert config.require_consistency_check is True
+    assert config.consistency_tolerance.max_abs_diff == 1e-6
+
+
+def test_multi_endpoint_embedding_config_rejects_empty_endpoints() -> None:
+    with pytest.raises(ValidationError):
+        MultiEndpointEmbeddingConfig(endpoints=[])
 
 
 def test_http_embedding_client_supports_response_format_a() -> None:
@@ -255,3 +306,229 @@ def test_http_embedding_client_from_env_raises_for_invalid_batch_size(
     monkeypatch.setenv("EMBEDDING_BATCH_SIZE", "bad-batch")
     with pytest.raises(EmbeddingClientError, match="EMBEDDING_BATCH_SIZE"):
         http_embedding_client_from_env()
+
+
+def test_run_embedding_consistency_check_passes_for_identical_vectors() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ]
+    )
+    result = run_embedding_consistency_check(
+        config,
+        [
+            StaticEmbeddingClient([0.1, 0.2, 0.3]),
+            StaticEmbeddingClient([0.1, 0.2, 0.3]),
+        ],
+        input_text="probe text",
+    )
+    assert result.passed is True
+    assert result.failure_reason is None
+    assert result.max_abs_diff == 0.0
+    assert result.endpoint_ids == ["endpoint-a", "endpoint-b"]
+
+
+def test_run_embedding_consistency_check_respects_tolerance() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ],
+        consistency_tolerance=EmbeddingConsistencyTolerance(max_abs_diff=1e-4),
+    )
+    result = run_embedding_consistency_check(
+        config,
+        [
+            StaticEmbeddingClient([0.1, 0.2]),
+            StaticEmbeddingClient([0.10001, 0.19999]),
+        ],
+        input_text="probe text",
+    )
+    assert result.passed is True
+    assert result.max_abs_diff is not None
+    assert result.max_abs_diff <= 1e-4
+
+
+def test_run_embedding_consistency_check_fails_for_vector_difference() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ],
+        consistency_tolerance=EmbeddingConsistencyTolerance(max_abs_diff=1e-6),
+    )
+    result = run_embedding_consistency_check(
+        config,
+        [
+            StaticEmbeddingClient([0.1, 0.2]),
+            StaticEmbeddingClient([0.3, 0.4]),
+        ],
+        input_text="probe text",
+    )
+    assert result.passed is False
+    assert "exceeded max_abs_diff tolerance" in (result.failure_reason or "")
+
+
+def test_run_embedding_consistency_check_fails_for_dimension_mismatch() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ]
+    )
+    result = run_embedding_consistency_check(
+        config,
+        [
+            StaticEmbeddingClient([0.1, 0.2]),
+            StaticEmbeddingClient([0.1, 0.2, 0.3]),
+        ],
+        input_text="probe text",
+    )
+    assert result.passed is False
+    assert "returned dimension" in (result.failure_reason or "")
+
+
+def test_run_embedding_consistency_check_fails_when_endpoint_client_errors() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ]
+    )
+    result = run_embedding_consistency_check(
+        config,
+        [
+            StaticEmbeddingClient([0.1, 0.2]),
+            FailingEmbeddingClient(),
+        ],
+        input_text="probe text",
+    )
+    assert result.passed is False
+    assert "Endpoint endpoint-b failed" in (result.failure_reason or "")
+
+
+def test_run_embedding_consistency_check_fails_for_empty_vector_result() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ]
+    )
+    result = run_embedding_consistency_check(
+        config,
+        [
+            StaticEmbeddingClient([0.1, 0.2]),
+            EmptyVectorEmbeddingClient(),
+        ],
+        input_text="probe text",
+    )
+    assert result.passed is False
+    assert "empty vector" in (result.failure_reason or "")
+
+
+def test_run_embedding_consistency_check_fails_for_non_finite_vector_result() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ]
+    )
+    result = run_embedding_consistency_check(
+        config,
+        [
+            StaticEmbeddingClient([0.1, 0.2]),
+            NonFiniteEmbeddingClient(),
+        ],
+        input_text="probe text",
+    )
+    assert result.passed is False
+    assert "non-finite values" in (result.failure_reason or "")
+
+
+def test_run_embedding_consistency_check_fails_for_non_numeric_vector_result() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ]
+    )
+    result = run_embedding_consistency_check(
+        config,
+        [
+            StaticEmbeddingClient([0.1, 0.2]),
+            NonNumericEmbeddingClient(),
+        ],
+        input_text="probe text",
+    )
+    assert result.passed is False
+    assert "non-numeric values" in (result.failure_reason or "")
+
+
+def test_run_embedding_consistency_check_raises_for_client_count_mismatch() -> None:
+    config = MultiEndpointEmbeddingConfig(
+        endpoints=[
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/a",
+                endpoint_id="endpoint-a",
+            ),
+            HTTPEmbeddingClientConfig(
+                endpoint_url="https://example.com/b",
+                endpoint_id="endpoint-b",
+            ),
+        ]
+    )
+    with pytest.raises(EmbeddingClientError, match="clients length must match"):
+        run_embedding_consistency_check(
+            config,
+            [StaticEmbeddingClient([0.1, 0.2])],
+            input_text="probe text",
+        )

@@ -12,6 +12,8 @@ from urllib import error, request
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
+from eval_platform.embeddings.schema import EmbeddingConsistencyCheckResult
+
 
 def _non_empty_string(value: str, field_name: str) -> str:
     if not value.strip():
@@ -27,6 +29,7 @@ class HTTPEmbeddingClientConfig(BaseModel):
     """Configuration for the HTTP embedding client."""
 
     endpoint_url: str
+    endpoint_id: str | None = None
     model_name: str | None = None
     timeout_seconds: float = 60.0
     headers: dict[str, str] = Field(default_factory=dict)
@@ -36,6 +39,13 @@ class HTTPEmbeddingClientConfig(BaseModel):
     @field_validator("endpoint_url")
     @classmethod
     def validate_endpoint_url(cls, value: str, info: ValidationInfo) -> str:
+        return _non_empty_string(value, info.field_name or "field")
+
+    @field_validator("endpoint_id")
+    @classmethod
+    def validate_endpoint_id(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
         return _non_empty_string(value, info.field_name or "field")
 
     @field_validator("model_name")
@@ -56,6 +66,31 @@ class HTTPEmbeddingClientConfig(BaseModel):
     @classmethod
     def validate_response_vector_field(cls, value: str, info: ValidationInfo) -> str:
         return _non_empty_string(value, info.field_name or "field")
+
+
+class EmbeddingConsistencyTolerance(BaseModel):
+    """Tolerance rule for multi-endpoint vector consistency."""
+
+    max_abs_diff: float = Field(default=0.0, ge=0)
+
+
+class MultiEndpointEmbeddingConfig(BaseModel):
+    """Configuration for a pool of embedding endpoints."""
+
+    endpoints: list[HTTPEmbeddingClientConfig]
+    require_consistency_check: bool = True
+    consistency_tolerance: EmbeddingConsistencyTolerance = Field(
+        default_factory=EmbeddingConsistencyTolerance
+    )
+
+    @field_validator("endpoints")
+    @classmethod
+    def validate_endpoints(
+        cls, value: list[HTTPEmbeddingClientConfig]
+    ) -> list[HTTPEmbeddingClientConfig]:
+        if not value:
+            raise ValueError("endpoints must not be empty")
+        return value
 
 
 @runtime_checkable
@@ -88,6 +123,44 @@ class FakeEmbeddingClient:
                 values.append(raw / 4294967295.0)
             vectors.append(values)
         return vectors
+
+
+def _endpoint_identifier(config: HTTPEmbeddingClientConfig) -> str:
+    return config.endpoint_id or config.endpoint_url
+
+
+def _validate_probe_vector(vector: list[float], endpoint_id: str) -> list[float]:
+    if not vector:
+        raise EmbeddingClientError(f"Endpoint {endpoint_id} returned an empty vector")
+    normalized: list[float] = []
+    for item in vector:
+        if not isinstance(item, (int, float)):
+            raise EmbeddingClientError(
+                f"Endpoint {endpoint_id} returned a vector with non-numeric values"
+            )
+        value = float(item)
+        if not math.isfinite(value):
+            raise EmbeddingClientError(
+                f"Endpoint {endpoint_id} returned a vector with non-finite values"
+            )
+        normalized.append(value)
+    return normalized
+
+
+def _failed_consistency_result(
+    *,
+    input_text: str,
+    endpoint_ids: list[str],
+    failure_reason: str,
+    max_abs_diff: float,
+) -> EmbeddingConsistencyCheckResult:
+    return EmbeddingConsistencyCheckResult(
+        input_text=input_text,
+        endpoint_ids=endpoint_ids,
+        passed=False,
+        failure_reason=failure_reason,
+        max_abs_diff=max_abs_diff,
+    )
 
 
 def _default_transport(
@@ -251,3 +324,88 @@ def http_embedding_client_from_env(prefix: str = "EMBEDDING") -> HTTPEmbeddingCl
         batch_size=batch_size,
     )
     return HTTPEmbeddingClient(config)
+
+
+def run_embedding_consistency_check(
+    config: MultiEndpointEmbeddingConfig,
+    clients: Sequence[EmbeddingClient],
+    *,
+    input_text: str,
+) -> EmbeddingConsistencyCheckResult:
+    """Run a deterministic one-text consistency check across multiple endpoints."""
+    if not input_text.strip():
+        raise EmbeddingClientError("input_text must not be empty")
+    if len(clients) != len(config.endpoints):
+        raise EmbeddingClientError("clients length must match configured endpoints")
+
+    endpoint_ids = [_endpoint_identifier(endpoint) for endpoint in config.endpoints]
+    reference_vector: list[float] | None = None
+    max_abs_diff = 0.0
+
+    for endpoint_id, client in zip(endpoint_ids, clients, strict=True):
+        try:
+            vectors = client.embed_texts([input_text])
+        except Exception as exc:
+            return _failed_consistency_result(
+                input_text=input_text,
+                endpoint_ids=endpoint_ids,
+                failure_reason=f"Endpoint {endpoint_id} failed: {type(exc).__name__}: {exc}",
+                max_abs_diff=max_abs_diff,
+            )
+
+        if len(vectors) != 1:
+            return _failed_consistency_result(
+                input_text=input_text,
+                endpoint_ids=endpoint_ids,
+                failure_reason=(
+                    f"Endpoint {endpoint_id} returned {len(vectors)} vectors "
+                    "for one input"
+                ),
+                max_abs_diff=max_abs_diff,
+            )
+
+        try:
+            current_vector = _validate_probe_vector(vectors[0], endpoint_id)
+        except EmbeddingClientError as exc:
+            return _failed_consistency_result(
+                input_text=input_text,
+                endpoint_ids=endpoint_ids,
+                failure_reason=str(exc),
+                max_abs_diff=max_abs_diff,
+            )
+        if reference_vector is None:
+            reference_vector = current_vector
+            continue
+
+        if len(current_vector) != len(reference_vector):
+            return _failed_consistency_result(
+                input_text=input_text,
+                endpoint_ids=endpoint_ids,
+                failure_reason=(
+                    f"Endpoint {endpoint_id} returned dimension {len(current_vector)} "
+                    f"expected {len(reference_vector)}"
+                ),
+                max_abs_diff=max_abs_diff,
+            )
+
+        pair_max_abs_diff = max(
+            abs(left - right) for left, right in zip(reference_vector, current_vector, strict=True)
+        )
+        max_abs_diff = max(max_abs_diff, pair_max_abs_diff)
+        if pair_max_abs_diff > config.consistency_tolerance.max_abs_diff:
+            return _failed_consistency_result(
+                input_text=input_text,
+                endpoint_ids=endpoint_ids,
+                failure_reason=(
+                    f"Endpoint {endpoint_id} exceeded max_abs_diff tolerance "
+                    f"{config.consistency_tolerance.max_abs_diff}"
+                ),
+                max_abs_diff=max_abs_diff,
+            )
+
+    return EmbeddingConsistencyCheckResult(
+        input_text=input_text,
+        endpoint_ids=endpoint_ids,
+        passed=True,
+        max_abs_diff=max_abs_diff,
+    )
