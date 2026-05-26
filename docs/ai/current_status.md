@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Shard-aware chunked_corpus / embeddings artifacts ready for merge review.
+Elasticsearch ingest artifact in progress.
 
 ## Implemented
 
@@ -23,20 +23,20 @@ Shard-aware chunked_corpus / embeddings artifacts ready for merge review.
 - Stream-oriented `iter_chunk_shards(...)` / `iter_embedding_shards(...)`
 - Stream-oriented embedding shard writer without full-corpus accumulation
 - Reusable progress reporter for raw-to-normalized / chunking / embedding
+- Elasticsearch ingest runner from sharded `chunked_corpus` to auditable `elasticsearch_index` artifact
 
 ## In Progress
 
-- None for the current phase
+- Elasticsearch ingest PR validation
 
 ## Not Implemented
 
 - Corpus build runner
 - Milvus ingest
-- ES ingest
 - Retrieval pipeline
 - Metrics and reports
 - Frontend dashboard
 
 ## Next Task
 
-Open and merge shard-aware artifact PR, then start Milvus ingest on top of shard zip join.
+Open and merge Elasticsearch ingest PR, then start Milvus ingest on top of shard zip join.
