@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Raw dataset artifact ready for merge review.
+Raw dataset to normalized dataset ready for merge review.
 
 ## Implemented
 
@@ -19,6 +19,7 @@ Raw dataset artifact ready for merge review.
 - Multi-endpoint embedding consistency pre-check helper
 - Embedding provenance endpoint and consistency metadata
 - Raw dataset artifact schema and import helpers, if merged
+- Raw snapshot to normalized dataset API for IFIRNFCorpus
 
 ## In Progress
 
@@ -26,7 +27,6 @@ Raw dataset artifact ready for merge review.
 
 ## Not Implemented
 
-- Raw dataset -> normalized dataset dependency wiring
 - Milvus index builder
 - ES index builder
 - Retrieval pipeline
@@ -34,4 +34,4 @@ Raw dataset artifact ready for merge review.
 - Frontend dashboard
  
 ## Next Task
-Open and merge raw dataset artifact PR, then start raw_dataset -> normalized_dataset dependency wiring.
+Open and merge raw-to-normalized PR, then expand dataset-specific raw normalizers for the remaining raw assets.

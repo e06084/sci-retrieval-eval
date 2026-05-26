@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from eval_platform.artifacts import (
+    ArtifactDependency,
     ArtifactIncompleteError,
     ArtifactManifest,
     LocalArtifactStore,
@@ -164,3 +165,18 @@ def test_success_marker_written_after_manifest(store: LocalArtifactStore) -> Non
 
     assert manifest.artifact_id == "sample_001"
     assert store.is_complete(NORMALIZED_DATASET_ARTIFACT_TYPE, "sample_001") is True
+
+
+def test_write_normalized_dataset_artifact_accepts_dependencies(
+    store: LocalArtifactStore,
+) -> None:
+    manifest = write_normalized_dataset_artifact(
+        store,
+        "sample_001",
+        _sample_dataset(),
+        dependencies=[ArtifactDependency(artifact_type="raw_dataset", artifact_id="raw_001")],
+    )
+
+    assert manifest.dependencies == [
+        ArtifactDependency(artifact_type="raw_dataset", artifact_id="raw_001")
+    ]

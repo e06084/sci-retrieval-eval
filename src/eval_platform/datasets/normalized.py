@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from eval_platform.artifacts.manifest import ArtifactFile, ArtifactManifest
+from eval_platform.artifacts.manifest import ArtifactDependency, ArtifactFile, ArtifactManifest
 from eval_platform.artifacts.store import ArtifactIncompleteError, ArtifactStore
 from eval_platform.datasets.jsonl import dump_jsonl, load_jsonl
 from eval_platform.datasets.schema import (
@@ -28,6 +28,7 @@ def write_normalized_dataset_artifact(
     created_by: str | None = None,
     code_git_sha: str | None = None,
     metadata: dict[str, Any] | None = None,
+    dependencies: list[ArtifactDependency] | None = None,
 ) -> ArtifactManifest:
     """Write a normalized dataset artifact to the given store."""
     corpus_bytes = dump_jsonl(dataset.corpus).encode("utf-8")
@@ -61,6 +62,7 @@ def write_normalized_dataset_artifact(
         created_at=created_at or datetime.now(UTC),
         created_by=created_by,
         code_git_sha=code_git_sha,
+        dependencies=list(dependencies or []),
         metadata=manifest_metadata,
         files=[
             ArtifactFile(path=filename, size_bytes=len(payload))

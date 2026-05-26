@@ -6,8 +6,8 @@
 
 ## 1. 任务信息
 
-- 任务名：新增 raw_dataset artifact
-- 当前分支：`feat/raw-dataset-artifact`
+- 任务名：开发 raw_dataset -> normalized_dataset
+- 当前分支：`feat/raw-to-normalized`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-26
 - 完成时间：2026-05-26
@@ -15,34 +15,41 @@
 ## 2. 本次改动
 
 - 改了什么：
-  - 新增 `src/eval_platform/datasets/raw.py`，定义 `raw_dataset` artifact 的 schema、manifest 字段和读写逻辑。
-  - 新增 `src/eval_platform/datasets/raw_import.py`，支持：
-    - 从本地目录导入 raw 文件元数据快照
-    - 从既有 S3 prefix 导入 raw 文件元数据快照
-  - 更新 `src/eval_platform/datasets/__init__.py`，导出 `raw_dataset` 相关公共接口。
-  - 根据验收反馈，把第一版实现收紧为 snapshot-only：
-    - 不再复制 raw 文件内容到 artifact store
-    - artifact 内只写 `_MANIFEST.json` 和 `_SUCCESS`
-  - 新增 `tests/datasets/test_raw_dataset.py`，覆盖 snapshot-only、本地目录导入、fake S3 source 导入、fake S3 output 和流式 body 场景。
-  - 新增 ADR `docs/decisions/0011-raw-dataset-artifact.md`。
-  - 修复 `tests/chunking/test_external_chunking_runner.py` 中不稳定的错误 commit SHA 构造，保证 mismatch 测试一定使用不同 SHA。
+  - 新增 `src/eval_platform/datasets/raw_normalize.py`
+    - 定义 `RawToNormalizedConfig`
+    - 定义 `RawFileOpener` protocol
+    - 实现 `S3RawFileOpener`
+    - 实现 `normalize_raw_dataset_artifact(...)`
+    - 第一版支持 `IFIRNFCorpus`
+  - 扩展 `src/eval_platform/datasets/normalized.py`
+    - `write_normalized_dataset_artifact(...)` 新增可选 `dependencies`
+    - 保持旧调用方兼容
+  - 更新 `src/eval_platform/datasets/__init__.py`
+    - 导出 raw-to-normalized 公共接口
+  - 新增 `tests/datasets/test_raw_normalize.py`
+    - 覆盖 raw snapshot -> normalized artifact
+    - 覆盖 dependency
+    - 覆盖 query instruction metadata
+    - 覆盖流式 opener 约束
+  - 扩展 `tests/datasets/test_normalized_dataset.py`
+    - 验证 `write_normalized_dataset_artifact(...)` 传 dependency 时兼容
+  - 新增 ADR `docs/decisions/0012-raw-to-normalized-dataset.md`
 - 为什么这样改：
-  - 当前 `normalized_dataset` 直接从内存对象开始，缺少“原始输入先落盘”的可审计层。
-  - `raw_dataset` artifact 先固定原始文件身份，后续才能稳定建立 `raw_dataset -> normalized_dataset` 依赖。
-  - 验收反馈指出之前的 `dict[str, bytes]` 聚合方案在大文件场景下仍会把 raw 内容积到内存里，不满足本任务目标，所以改成 manifest snapshot 设计。
+  - `raw_dataset` 已经是可信输入快照，但 `normalized_dataset` 还没有显式绑定 raw 上游身份。
+  - 本轮把 `normalized_dataset` 明确变成 `raw_dataset` 的标准化产物，并保证 raw source 的打开方式可注入、可测试。
 - 没改什么：
-  - 没有实现 `raw_dataset -> normalized_dataset` 自动转换。
-  - 没有实现 chunk / embedding / ES / Milvus / retrieval / metrics。
-  - 没有访问真实外部服务或真实 S3。
+  - 没有实现 runner / orchestration
+  - 没有实现 chunk / embedding / ES / Milvus / retrieval / metrics
+  - 没有访问真实外部服务
 
 ## 3. 涉及文件
 
 - `src/eval_platform/datasets/__init__.py`
-- `src/eval_platform/datasets/raw.py`
-- `src/eval_platform/datasets/raw_import.py`
-- `tests/datasets/test_raw_dataset.py`
-- `tests/chunking/test_external_chunking_runner.py`
-- `docs/decisions/0011-raw-dataset-artifact.md`
+- `src/eval_platform/datasets/normalized.py`
+- `src/eval_platform/datasets/raw_normalize.py`
+- `tests/datasets/test_normalized_dataset.py`
+- `tests/datasets/test_raw_normalize.py`
+- `docs/decisions/0012-raw-to-normalized-dataset.md`
 - `docs/ai/current_status.md`
 - `report.md`
 
@@ -53,51 +60,94 @@
 
 ## 4. 实现说明
 
-### 4.1 关键决策
+### 4.1 raw-to-normalized API
 
-- 决策 1：
-  - `raw_dataset` 放在 `datasets/` 下，而不是 `artifacts/` 下。
-  - 理由是这层仍属于“数据输入身份”，和 `normalized_dataset` 属于同一数据域。
-- 决策 2：
-  - 第一版 `raw_dataset` 采用 snapshot-only 设计，不复制 raw 文件内容。
-  - 理由是已知 raw source（尤其 `ifir_scifact/corpus.jsonl` 约 745MB）不适合通过 `dict[str, bytes]` 聚合后再写入。
-- 决策 3：
-  - manifest metadata 中的系统字段统一由写入逻辑最后覆盖，避免用户 metadata 覆盖 `stage / file_count / content_fingerprint_sha256` 等关键信息。
+新增入口：
 
-### 4.2 关键行为
+```python
+normalize_raw_dataset_artifact(
+    source_store,
+    output_store,
+    RawToNormalizedConfig(...),
+    opener=...,
+)
+```
 
-- 行为 1：
-  - `raw_dataset` manifest metadata 至少包含：
-    - `stage`
-    - `source_type`
-    - `source_uri`
-    - `dataset_name`
-    - `dataset_revision`
-    - `file_count`
-    - `total_size_bytes`
-    - `files`
-    - `content_fingerprint_sha256`
-    - `import_parameters`
-- 行为 2：
-  - `RawDatasetFile` 记录：
-    - `path`
-    - `uri`
-    - `size_bytes`
-    - `sha256`
-- 行为 3：
-  - 单文件 `sha256` 通过流式读取计算：
-    - 按固定 chunk 大小逐块 `read(...)`
-    - 每块增量更新 `hashlib.sha256()`
-    - 不在 hash 阶段一次性整文件读入内存
-- 行为 4：
-  - dataset 级 `content_fingerprint_sha256` 按稳定排序后的 `(path, uri, size_bytes, sha256)` 序列计算：
-    - `path<TAB>uri<TAB>size<TAB>sha256<LF>`
-    - 再整体做 `sha256`
-  - 这样文件内容不变且路径/顺序稳定时，fingerprint 可复现。
-- 行为 5：
-  - snapshot-only artifact 不会写 `files/...`，只写：
-    - `_MANIFEST.json`
-    - `_SUCCESS`
+含义：
+
+- 输入：`raw_dataset` artifact
+- 输出：`normalized_dataset` artifact
+- `source_store` 与 `output_store` 可以不同
+- `opener` 负责按 `RawDatasetFile.uri` 打开原始文件流
+- 当前内置生产 opener：
+  - `S3RawFileOpener`
+  - 默认用 boto3 client 打开 `s3://bucket/key`
+  - 测试使用 fake S3 client，不访问真实 S3
+
+### 4.2 IFIRNFCorpus 字段映射
+
+第一版只支持：
+
+- `dataset_name == "IFIRNFCorpus"`
+- 或 `normalizer_name == "ifir_nfcorpus_raw_jsonl_tsv_v1"`
+
+映射规则：
+
+- `corpus.jsonl`
+  - `_id -> CorpusRecord.doc_id`
+  - `title -> CorpusRecord.title`
+  - `text -> CorpusRecord.text`
+- `queries.jsonl`
+  - `_id -> QueryRecord.query_id`
+  - `text -> QueryRecord.text`
+- `instructions.jsonl`
+  - `query-id -> QueryRecord.metadata["instruction"]`
+- `qrels/test.tsv`
+  - `query-id -> QrelRecord.query_id`
+  - `corpus-id -> QrelRecord.doc_id`
+  - `score -> QrelRecord.relevance`
+
+### 4.3 dependency 写入方式
+
+`write_normalized_dataset_artifact(...)` 新增：
+
+```python
+dependencies: list[ArtifactDependency] | None = None
+```
+
+raw-to-normalized 调用时会写入：
+
+- `artifact_type = "raw_dataset"`
+- `artifact_id = config.source_artifact_id`
+
+同时 normalized manifest metadata 至少写入：
+
+- `source = "raw_dataset"`
+- `task_name`
+- `split`
+- `normalizer_name`
+- `raw_dataset_artifact_id`
+- `raw_dataset_fingerprint`
+- `raw_source_uri`
+- `normalized_schema_version`
+
+### 4.4 streaming 如何保证
+
+本轮没有通过 `mteb.load_data()` 走内存对象。
+
+`IFIRNFCorpus` 的 raw 文件读取方式：
+
+- JSONL：
+  - 通过 `for raw_line in stream` 逐行解析
+  - 不做 `body.read().decode()`
+- TSV：
+  - 通过 `csv.DictReader(...)` 读取
+  - 测试样本里规模很小
+
+测试中使用 `FakeRawFileOpener` + `RecordingBinaryStream` 验证：
+
+- corpus JSONL 确实通过迭代逐行读取
+- 不会对 corpus stream 调用 `read(-1)` 一次性整文件读取
 
 ## 5. 自检结果
 
@@ -109,53 +159,46 @@ git diff --name-only origin/main...HEAD
 pytest tests/datasets tests/artifacts
 ruff check .
 mypy .
+pytest
 ```
 
 ### 5.2 输出摘要
 
 - `git status --short`：
-  - 开发完成前仅包含 `src/eval_platform/datasets/`、`tests/datasets/`、ADR、`current_status.md` 与 `report.md` 改动。
+  - 开发完成前仅包含 `src/eval_platform/datasets/`、`tests/datasets/`、ADR、`current_status.md` 与 `report.md` 改动
 - `git diff --name-only origin/main...HEAD`：
-  - 本轮提交前工作区只涉及：
-    - `src/eval_platform/datasets/`
-    - `tests/datasets/`
-    - `tests/chunking/test_external_chunking_runner.py`
-    - `docs/decisions/0011-raw-dataset-artifact.md`
-    - `docs/ai/current_status.md`
-    - `report.md`
-  - `tests/chunking/test_external_chunking_runner.py` 为基线测试稳定性修复，不改生产 `chunking/` 代码。
-  - 不包含 `src/eval_platform/chunking/`、`embeddings/`、`retrieval/`、`metrics/` 等越界生产目录。
+  - 只涉及允许范围内文件
+  - 不包含 `chunking/`、`embeddings/`、`indexes/`、`retrieval/`、`metrics/`
 - `pytest tests/datasets tests/artifacts`：
-  - 通过，`89 passed`
-- `pytest`：
-  - 通过，`336 passed`
+  - 通过，`93 passed`
 - `ruff check .`：
   - 通过
 - `mypy .`：
-  - 通过，`Success: no issues found in 82 source files`
+  - 通过，`Success: no issues found in 84 source files`
+- `pytest`：
+  - 通过，`340 passed`
 
 ### 5.3 提交信息
 
 - 是否已提交：`yes`
 - commit subjects：
-  - `Add raw dataset artifact`
-  - `Switch raw dataset artifact to snapshot-only`
-  - `Stabilize external chunker SHA mismatch test`
+  - `Add raw to normalized dataset adapter`
+  - `Add S3 raw file opener`
 - 验收者确认的最终 commit：
 
 ## 6. 风险与未决项
 
 - 已知风险：
-  - 第一版是 snapshot-only，不提供 raw 副本 materialization；如果后续需要“导入时顺手复制 raw 数据”，需要单独扩展流式写入能力。
+  - 第一版只覆盖 `IFIRNFCorpus`，其余 raw asset 仍需补 dataset-specific raw normalizer
+  - 当前 writer 仍要求先构造内存中的 `NormalizedDataset`；在支持 `ifir_scifact` 这类更大 corpus 前，还需要 streaming normalized writer 或分批 writer
 - 未覆盖场景：
-  - 本轮没有实现后续 `raw_dataset -> normalized_dataset` 依赖连接。
+  - 还没有批量 runner / orchestration
 - 需要验收者重点检查的点：
-  - `content_fingerprint_sha256` 的定义是否满足后续复现实验要求。
-  - snapshot-only 语义是否与后续 normalizer 设计一致。
+  - `raw_source_uri` 的定义是否足够稳定
+  - `normalizer_name` 的命名是否满足后续扩展
 
 ## 7. 交付结论
 
 - 是否建议验收：`yes`
 - 是否建议合并：`yes`
-- 如果不能合并，卡点是什么：
-  - 当前全量 `pytest` 存在一条与本任务无关的 `chunking` 基线失败，需要验收方按项目当前基线判断是否阻塞
+- 如果不能合并，卡点是什么：无
