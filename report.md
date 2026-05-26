@@ -4,212 +4,262 @@
 
 ## 1. 任务信息
 
-- 任务名：`五数据集 raw normalizer 扩展`
-- 当前分支：`feat/raw-normalizers-all-datasets`
+- 任务名：`retrieval_run artifact`
+- 当前分支：`feat/retrieval-run-artifact`
 - 对应指令文件：`TASK.md`
-- 开始时间：2026-05-26
-- 完成时间：2026-05-26
+- 开始时间：2026-05-27
+- 完成时间：2026-05-27
 
 ## 2. 本次改动
 
-- 扩展 `src/eval_platform/datasets/raw_normalize.py`
-  - 新增 `RawNormalizerSpec`
-  - 新增 `RAW_NORMALIZER_SPECS`
-  - 新增 `SUPPORTED_RAW_NORMALIZER_DATASET_NAMES`
-  - 支持 `jsonl_tsv` raw 格式
-  - 支持 `LitSearchRetrieval` 的 parquet 目录分片 raw 格式
-  - 校验 unsupported dataset 和 normalizer mismatch
-  - manifest metadata 增加 `raw_format` / `has_instructions`
-  - 返工修复 `LitSearchRetrieval` 真实 raw parquet 目录分片布局
-  - 返工对齐 MTEB LitSearch 数据质量语义，过滤无可用文本 doc / orphan qrels / 无剩余 qrel query
-- 更新 `src/eval_platform/corpus_build/runner.py`
-  - `CorpusBuildConfig.dataset_name` 改为从 raw normalizer registry 取 allowlist
-  - 不改变 runner 阶段顺序和 artifact id 串联方式
-- 更新 `src/eval_platform/datasets/__init__.py`
-  - 导出 raw normalizer registry 相关公共对象
-- 扩展测试
-  - `tests/datasets/test_raw_normalize.py`
-  - `tests/corpus_build/test_runner.py`
-- 新增 ADR
-  - `docs/decisions/0018-raw-normalizers-all-datasets.md`
-- 更新状态文档
+- 新增 retrieval schema：
+  - `RetrievalHit`
+  - `RetrievalQueryResult`
+- 新增 retrieval JSONL helper：
+  - `dump_retrieval_results_jsonl(...)`
+  - `load_retrieval_results_jsonl(...)`
+- 新增 `retrieval_run` artifact IO：
+  - `write_retrieval_run_artifact(...)`
+  - `read_retrieval_run_artifact(...)`
+  - 默认按 `results/part-xxxxx.jsonl` 分片写出
+- 新增 retrieval client protocols：
+  - `ElasticsearchRetrievalClient`
+  - `MilvusRetrievalClient`
+  - `RewriteClient`
+  - `RerankClient`
+- 新增 fusion helpers：
+  - `rrf_fuse(...)`
+  - `dedupe_sequential(...)`
+  - `dedupe_by_chunk_id(...)`
+- 新增 retrieval runner：
+  - `RetrievalRunConfig`
+  - `RetrievalRunError`
+  - `run_retrieval(...)`
+- 返修 retrieval trace / replay 设计：
+  - 默认 `trace_mode="replay"` 写入 replay trace
+  - `trace_mode="none"` 显式关闭 trace
+  - `execution_mode="replay"` 从既有 `retrieval_run` artifact 复制结果
+  - replay 模式不会调用 rewrite / embedding / ES / Milvus / rerank client
+  - query 级异常在 `trace_mode="replay"` 下也写入最小错误 trace，保证带失败 query 的 run 可 replay
+- 更新：
+  - `src/eval_platform/retrieval/__init__.py`
+  - `docs/decisions/0019-retrieval-run-artifact.md`
   - `docs/ai/current_status.md`
   - `report.md`
+- 新增测试：
+  - `tests/retrieval/test_fusion.py`
+  - `tests/retrieval/test_artifact.py`
+  - `tests/retrieval/test_runner.py`
 
-## 3. 支持的数据集
+## 3. Artifact 设计
 
-| dataset_name | normalizer_name | raw_format | has_instructions |
-| --- | --- | --- | --- |
-| `IFIRNFCorpus` | `ifir_nfcorpus_raw_jsonl_tsv_v1` | `jsonl_tsv` | `true` |
-| `IFIRScifact` | `ifir_scifact_raw_jsonl_tsv_v1` | `jsonl_tsv` | `true` |
-| `NFCorpus` | `nfcorpus_raw_jsonl_tsv_v1` | `jsonl_tsv` | `false` |
-| `SciFact` | `scifact_raw_jsonl_tsv_v1` | `jsonl_tsv` | `false` |
-| `LitSearchRetrieval` | `litsearch_raw_parquet_v1` | `parquet_dir_shards` | `false` |
+新增 artifact type：
 
-## 4. 实现说明
-
-### 4.1 JSONL / TSV normalizer
-
-适用于：
-
-- `IFIRNFCorpus`
-- `IFIRScifact`
-- `NFCorpus`
-- `SciFact`
-
-读取文件：
-
-- `corpus.jsonl`
-- `queries.jsonl`
-- `qrels/test.tsv`
-- `instructions.jsonl`，仅 IFIR 系列启用
-
-字段映射：
-
-- `corpus._id` -> `CorpusRecord.doc_id`
-- `corpus.title` -> `CorpusRecord.title`
-- `corpus.text` -> `CorpusRecord.text`
-- `queries._id` -> `QueryRecord.query_id`
-- `queries.text` -> `QueryRecord.text`
-- `qrels.query-id` -> `QrelRecord.query_id`
-- `qrels.corpus-id` -> `QrelRecord.doc_id`
-- `qrels.score` -> `QrelRecord.relevance`
-- `instructions.instruction` -> `QueryRecord.metadata["instruction"]`
-
-### 4.2 LitSearch parquet normalizer
-
-适用于：
-
-- `LitSearchRetrieval`
-
-读取文件：
-
-- `corpus/*.parquet`
-- `queries/*.parquet`
-- `qrels/*.parquet`
-
-目录分片策略：
-
-- 每组 shard 按 `PurePosixPath(file.path).as_posix()` 排序读取。
-- 同组多个 parquet shard 的 rows 合并后再构造 `NormalizedDataset`。
-- 缺少 `corpus/*.parquet`、`queries/*.parquet` 或 `qrels/*.parquet` 时抛 `RawNormalizeError`。
-- `raw_source_uri` 从 shard 相对路径回退到 raw prefix，例如 `s3://bucket/raw/litsearch`。
-
-数据质量过滤策略：
-
-- `CorpusRecord.text` 取第一个非空字段：`text`、`abstract`、`title`。
-- `text` / `abstract` / `title` 都不可用的 doc 会被丢弃。
-- 指向已丢弃 doc 或缺失 doc 的 qrel 会被丢弃。
-- 没有剩余 qrel 的 query 会被丢弃。
-- 如果发生过滤，manifest metadata 写入 `filtered_corpus_count`、`dropped_corpus_count`、`dropped_qrel_count`、`dropped_query_count`。
-
-Parquet 依赖策略：
-
-- 基础安装不新增强依赖。
-- 运行 LitSearch parquet normalizer 时 lazy import。
-- 优先尝试 `pandas.read_parquet(...)`。
-- 如果不可用，再尝试 `pyarrow.parquet`。
-- 如果两者都不可用，抛 `RawNormalizeError("pandas or pyarrow is required to normalize parquet raw datasets")`。
-- 单元测试通过 monkeypatch parquet reader，不依赖真实 parquet 库。
-
-### 4.3 Manifest metadata
-
-`normalized_dataset` manifest 继续记录：
-
-- `source`
-- `task_name`
-- `split`
-- `normalizer_name`
-- `raw_dataset_artifact_id`
-- `raw_dataset_fingerprint`
-- `raw_source_uri`
-- `normalized_schema_version`
-
-本轮新增：
-
-- `raw_format`
-- `has_instructions`
-
-### 4.4 Progress
-
-`raw_to_normalized` progress 保留并扩展：
-
-- `jsonl_tsv` 数据集汇报 `corpus` / `queries` / `instructions` 可选 / `qrels`
-- `parquet` 数据集汇报 `corpus` / `queries` / `qrels`
-- 每个事件 metadata 包含 `kind`、`record_count`、`path`
-
-### 4.5 Corpus build runner
-
-`CorpusBuildConfig.dataset_name` 不再硬编码 `IFIRNFCorpus`。
-
-当前 allowlist 来自：
-
-```python
-SUPPORTED_RAW_NORMALIZER_DATASET_NAMES
+```text
+retrieval_run
 ```
 
-runner 仍然只负责按 artifact id 串联阶段，不复制 raw parsing 逻辑。
+文件结构：
 
-## 5. 范围自检
+```text
+retrieval_run/<artifact_id>/
+  results/part-00000.jsonl
+  results/part-00001.jsonl
+  _MANIFEST.json
+  _SUCCESS
+```
+
+每条 JSONL 记录对应一个 normalized query：
+
+- `query_id`
+- `query_text`
+- `hits`
+- `trace`
+- `error`
+
+每个 hit 保留：
+
+- `rank`
+- `chunk_id`
+- `doc_id`
+- `title`
+- `text`
+- `score`
+- `recall_source`
+- `origin_es_score`
+- `origin_milvus_score`
+- `metadata`
+
+## 4. Manifest
+
+manifest metadata 记录：
+
+- `stage = retrieval_run`
+- `source_normalized_dataset_artifact_id`
+- `elasticsearch_index_artifact_id`
+- `milvus_collection_artifact_id`
+- `retrieval_mode`
+- `top_k`
+- `query_count`
+- `succeeded_query_count`
+- `failed_query_count`
+- `queries_per_shard`
+- `trace_mode`
+- `execution_mode`
+- `replay_source_retrieval_run_artifact_id`
+- `sub_queries`
+- `rewrite_enabled`
+- `rerank_enabled`
+- `hybrid_per_source_topk`
+- `rrf_path_topk`
+- `rerank_cross_path_topk`
+- `rerank_candidate_cap`
+- `result_file_count`
+- `result_record_count`
+
+dependencies 记录：
+
+- `normalized_dataset`
+- `elasticsearch_index`，当 ES recall 或 ES enrich 需要时
+- `milvus_collection`，当 `retrieval_mode in {"milvus", "hybrid"}` 时
+- `retrieval_run`，当 `execution_mode="replay"` 时记录源 run
+
+## 5. 检索算法对齐
+
+### 5.1 Retrieval Mode
+
+- `es`
+  - 调用 `es_client.search_bm25(index_name, query, top_k)`
+- `milvus`
+  - 调用 `embedding_client.embed_texts(...)`
+  - 调用 `milvus_client.search(collection_name, vector, top_k)`
+  - 调用 `es_client.enrich_by_chunk_ids(...)`
+- `hybrid`
+  - 调用 embedding / Milvus / ES
+  - 使用 RRF 融合
+  - 再调用 ES enrich
+
+Milvus 模式也要求 ES client 和 `index_name`，因为需要 ES enrich 来拿完整 chunk text。
+
+### 5.2 RRF
+
+RRF 对齐 `sciverse_benchmark.search_runtime.fusion.rrf_fuse`：
+
+```text
+score = sum(1 / (k + rank))
+k = 60
+sort = score desc, chunk_id asc
+```
+
+同一 `chunk_id` 同时来自 Milvus 和 ES 时：
+
+- `recall_source = "milvus|es"`
+- `origin_milvus_score` 保留 Milvus 原始分数
+- `origin_es_score` 保留 ES 原始分数
+
+### 5.3 Rewrite
+
+当 `rewrite_enabled=True and sub_queries > 0`：
+
+- 原 query 保留在第一位
+- rewrite query 去空白
+- lowercase 去重
+- 不保留与原 query 重复的 rewrite
+- 最多 `1 + sub_queries` 条 query path
+- 多 query path 下，Milvus/hybrid 会 batch 调用 `embed_texts(...)`
+
+### 5.4 Rerank
+
+当 `rerank_enabled=True`：
+
+- 候选先按 `score desc, chunk_id asc` 排序
+- `rerank_candidate_cap > 0` 时只 rerank head
+- rerank 结果后拼接未 rerank tail
+- 最终输出 `top_k`
+
+### 5.5 Trace / Replay
+
+- 默认 `trace_mode="replay"`，每条 query result 写入 trace；失败 query 写入最小错误 trace。
+- `trace_mode="none"` 时，query result 的 `trace` 为 `null`，manifest 记录 `trace_mode=none`。
+- replay trace 包含 `rewrite_queries`、`per_query`、每个 query path 的 ES / Milvus / fused hits、`rerank_input`、`rerank_hits` 和 `final_hits`。
+- 失败 query 的最小错误 trace 包含 `rewrite_queries`、空 `per_query` / `rerank_input` / `rerank_hits` / `final_hits`、`error` 和 `error_stage`。
+- `execution_mode="replay"` 必须提供 `replay_source_retrieval_run_artifact_id`。
+- replay 会读取源 `retrieval_run` artifact 并把 `query_id` / `query_text` / `hits` / `trace` 原样写入新 artifact。
+- 如果源 run 任何 record 缺少 trace，replay 会失败且不会写出完整 output artifact。
+- replay 模式不会调用 rewrite / embedding / Elasticsearch / Milvus / rerank client。
+
+## 6. 实现范围
+
+已实现：
+
+- artifact schema/read/write
+- RRF / dedupe 算法
+- runner orchestration
+- fake-client unit tests
+- query-level failure 记录
+- 默认 replay trace
+- query-level failure 最小错误 trace
+- `trace_mode="none"`
+- `execution_mode="replay"`
+
+未实现：
+
+- 真实 Elasticsearch retrieval adapter
+- 真实 Milvus retrieval adapter
+- 真实 rewrite adapter
+- 真实 rerank adapter
+- metrics 计算
+- evaluation runner
+- CLI / HTTP server
+
+## 7. 范围自检
 
 - 是否改动流程控制文档：`no`
-- 是否访问真实 S3 / ES / Milvus / embedding API：`no`
-- 是否修改 ES / Milvus ingest 语义：`no`
-- 是否修改 embedding / chunking 语义：`no`
-- 是否实现 retrieval / metrics / frontend：`no`
-- 是否新增 CLI / scheduler：`no`
+- 是否访问真实 ES / Milvus / embedding / rewrite / rerank 服务：`no`
+- 是否实现 metrics：`no`
+- 是否实现 evaluation runner：`no`
+- 是否实现 HTTP server / CLI：`no`
+- 是否修改 corpus build 主链路语义：`no`
+- 是否修改 ES / Milvus ingest artifact 语义：`no`
 - 是否提交 `.local_artifacts` 或真实 config / 密钥：`no`
 
-## 6. 自检结果
+## 8. 自检结果
 
-### 6.1 已运行命令
+### 8.1 已运行命令
 
 ```bash
-pytest tests/datasets/test_raw_normalize.py tests/corpus_build/test_runner.py
-pytest tests/datasets tests/corpus_build
+pytest tests/retrieval
 ruff check .
 mypy .
 pytest
 ```
 
-### 6.2 输出摘要
+### 8.2 输出摘要
 
-- `pytest tests/datasets/test_raw_normalize.py tests/corpus_build/test_runner.py`
-  - 通过，`44 passed`
-- `pytest tests/datasets tests/corpus_build`
-  - 通过，`90 passed`
+- `pytest tests/retrieval`
+  - 返修后通过，`19 passed`
 - `ruff check .`
-  - 通过
+  - 通过，`All checks passed!`
 - `mypy .`
-  - 通过，`Success: no issues found in 107 source files`
+  - 通过，`Success: no issues found in 117 source files`
 - `pytest`
-  - 通过，`469 passed`
+  - 通过，`488 passed`
 
-## 7. 风险与未决项
+## 9. 风险与未决项
 
-- 已知风险：
-  - 本轮只做 fake raw opener / local unit tests，没有访问真实 S3 raw source。
-  - LitSearch parquet 在真实运行时需要环境具备 `pandas` 或 `pyarrow`。
-  - one-off scripts 仍保留为历史参考，未迁移或删除。
-- 非目标：
-  - 不做 CLI。
-  - 不做 retrieval / metrics。
-  - 不做真实完整五数据集 ingest smoke。
-  - 不改 ES / Milvus / embedding / chunking 语义。
-- 需要验收者重点检查：
-  - 五个 dataset 是否都有明确 registry spec。
-  - unsupported dataset 和 normalizer mismatch 是否拒绝。
-  - LitSearch parquet 目录分片排序、合并、缺组错误、空文本过滤和 lazy import 是否清晰。
-  - runner 是否只从 registry 放开 allowlist，没有复制 raw parsing。
+- 本轮没有真实 ES / Milvus / rewrite / rerank adapter，因此真实联调仍需后续 PR。
+- `trace` 可能较大；默认写入 replay trace，如需节省空间必须显式设置 `trace_mode="none"`。
+- query-level error 当前写入 result artifact 并继续 run，同时写入最小错误 trace；后续 metrics 需要明确如何处理失败 query。
+- 真实 adapter 接入时需要检查 ES BM25 字段权重 `title^1.5` / `text` 和 ES enrich 返回顺序。
 
-## 8. 交付结论
+## 10. 交付结论
 
 - 是否建议验收：`yes`
 - 是否建议合并：`yes`
 - 如果不能合并，卡点是什么：无
 
-## 9. 提交信息
+## 11. 提交信息
 
 - 是否已提交：`yes`
-- commit subject：`Filter unusable LitSearch raw records`
-- 验收者确认的最终 commit：
+- commit subject：`Record retrieval error replay traces`
+- 验收者确认的最终 commit：由验收者用 `git log -1 --oneline` 确认

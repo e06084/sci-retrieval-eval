@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Five-dataset raw normalizer expansion ready for merge review.
+Retrieval run artifact ready for merge review.
 
 ## Implemented
 
@@ -28,18 +28,21 @@ Five-dataset raw normalizer expansion ready for merge review.
 - Corpus build runner v1 for IFIRNFCorpus with run-level `corpus_build` artifact
 - Raw-to-normalized normalizer registry for IFIRNFCorpus, IFIRScifact, NFCorpus, SciFact, and LitSearchRetrieval
 - Corpus build runner dataset allowlist backed by the raw normalizer registry
+- Retrieval hit/result schemas, RRF fusion, retrieval client protocols, retrieval runner, replay trace, replay execution mode, and `retrieval_run` artifact
 
 ## In Progress
 
-- Five-dataset raw normalizer PR validation
+- Retrieval run artifact PR validation
 
 ## Not Implemented
 
-- Retrieval pipeline
 - Metrics and reports
 - Frontend dashboard
 - Corpus build CLI / scheduler
+- Real Elasticsearch retrieval adapter
+- Real Milvus retrieval adapter
+- Real rewrite / rerank adapters
 
 ## Next Task
 
-Open and merge five-dataset raw normalizer PR, then run a controlled five-dataset raw-source smoke before retrieval pipeline design.
+Open and merge retrieval run artifact PR, then start `metrics_run` artifact design.
