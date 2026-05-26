@@ -4,7 +4,11 @@ from eval_platform.embeddings.artifact import (
     EMBEDDINGS_ARTIFACT_TYPE,
     EMBEDDINGS_FILENAME,
     EmbeddingArtifactError,
+    EmbeddingShard,
+    EmbeddingShardDescriptor,
+    iter_embedding_shards,
     read_embeddings_artifact,
+    write_embedding_shards_artifact,
     write_embeddings_artifact,
 )
 from eval_platform.embeddings.client import (
@@ -42,6 +46,8 @@ __all__ = [
     "EmbeddingConsistencyTolerance",
     "EmbeddingProvenance",
     "EmbeddingRecord",
+    "EmbeddingShard",
+    "EmbeddingShardDescriptor",
     "EmbeddedCorpus",
     "EmbeddingRunConfig",
     "EmbeddingRunError",
@@ -54,8 +60,10 @@ __all__ = [
     "dump_embeddings_jsonl",
     "http_embedding_client_from_env",
     "load_embeddings_jsonl",
+    "iter_embedding_shards",
     "read_embeddings_artifact",
     "run_embedding_consistency_check",
     "run_embedding",
+    "write_embedding_shards_artifact",
     "write_embeddings_artifact",
 ]

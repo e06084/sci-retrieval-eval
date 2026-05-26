@@ -12,13 +12,19 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest
 from eval_platform.artifacts.store import ArtifactStore
+from eval_platform.chunking.progress import ProgressReporter, report_progress
 from eval_platform.datasets.normalized import write_normalized_dataset_artifact
 from eval_platform.datasets.raw import (
     RAW_DATASET_ARTIFACT_TYPE,
     RawDatasetFile,
     read_raw_dataset_artifact,
 )
-from eval_platform.datasets.schema import CorpusRecord, NormalizedDataset, QrelRecord, QueryRecord
+from eval_platform.datasets.schema import (
+    CorpusRecord,
+    NormalizedDataset,
+    QrelRecord,
+    QueryRecord,
+)
 
 _NORMALIZED_SCHEMA_VERSION = "1"
 _IFIR_NFCORPUS_NORMALIZER = "ifir_nfcorpus_raw_jsonl_tsv_v1"
@@ -123,20 +129,65 @@ def _find_required_file(files: list[RawDatasetFile], relative_path: str) -> RawD
 def _load_ifir_nfcorpus_dataset(
     snapshot_files: list[RawDatasetFile],
     opener: RawFileOpener,
+    *,
+    progress_reporter: ProgressReporter | None = None,
 ) -> NormalizedDataset:
     corpus_file = _find_required_file(snapshot_files, "corpus.jsonl")
     queries_file = _find_required_file(snapshot_files, "queries.jsonl")
     instructions_file = _find_required_file(snapshot_files, "instructions.jsonl")
     qrels_file = _find_required_file(snapshot_files, "qrels/test.tsv")
 
+    completed_steps = 0
+    total_steps = 4
+
     with opener.open(corpus_file.uri) as corpus_stream:
         corpus_rows = _read_jsonl_records(corpus_stream)
+    completed_steps += 1
+    report_progress(
+        progress_reporter,
+        stage="raw_to_normalized",
+        current=completed_steps,
+        total=total_steps,
+        message="Loaded raw corpus records",
+        metadata={"kind": "corpus", "record_count": len(corpus_rows), "path": corpus_file.path},
+    )
     with opener.open(queries_file.uri) as queries_stream:
         query_rows = _read_jsonl_records(queries_stream)
+    completed_steps += 1
+    report_progress(
+        progress_reporter,
+        stage="raw_to_normalized",
+        current=completed_steps,
+        total=total_steps,
+        message="Loaded raw query records",
+        metadata={"kind": "queries", "record_count": len(query_rows), "path": queries_file.path},
+    )
     with opener.open(instructions_file.uri) as instructions_stream:
         instruction_rows = _read_jsonl_records(instructions_stream)
+    completed_steps += 1
+    report_progress(
+        progress_reporter,
+        stage="raw_to_normalized",
+        current=completed_steps,
+        total=total_steps,
+        message="Loaded raw instruction records",
+        metadata={
+            "kind": "instructions",
+            "record_count": len(instruction_rows),
+            "path": instructions_file.path,
+        },
+    )
     with opener.open(qrels_file.uri) as qrels_stream:
         qrel_rows = _read_tsv_rows(qrels_stream)
+    completed_steps += 1
+    report_progress(
+        progress_reporter,
+        stage="raw_to_normalized",
+        current=completed_steps,
+        total=total_steps,
+        message="Loaded raw qrel rows",
+        metadata={"kind": "qrels", "record_count": len(qrel_rows), "path": qrels_file.path},
+    )
 
     instructions_by_query_id = {
         str(row["query-id"]): str(row["instruction"])
@@ -189,6 +240,7 @@ def normalize_raw_dataset_artifact(
     config: RawToNormalizedConfig,
     *,
     opener: RawFileOpener,
+    progress_reporter: ProgressReporter | None = None,
 ) -> ArtifactManifest:
     """Normalize one raw snapshot artifact into a normalized dataset artifact."""
     snapshot = read_raw_dataset_artifact(source_store, config.source_artifact_id)
@@ -197,7 +249,11 @@ def normalize_raw_dataset_artifact(
     if normalizer_name != _IFIR_NFCORPUS_NORMALIZER:
         raise RawNormalizeError(f"Unsupported raw normalizer: {normalizer_name}")
 
-    dataset = _load_ifir_nfcorpus_dataset(snapshot.files, opener)
+    dataset = _load_ifir_nfcorpus_dataset(
+        snapshot.files,
+        opener,
+        progress_reporter=progress_reporter,
+    )
     raw_source_uri = snapshot.source_uri
     if snapshot.files:
         prefix = "qrels/test.tsv"

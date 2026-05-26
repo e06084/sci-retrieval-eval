@@ -2,11 +2,13 @@
 
 ## Current Phase
 
-Platform config system ready for merge review.
+Shard-aware chunked_corpus / embeddings artifacts ready for merge review.
 
 ## Implemented
 
 - Local/S3 artifact store
+- Raw dataset snapshot artifact
+- Raw snapshot to normalized dataset API
 - Normalized dataset schema
 - MTEB per-dataset normalizer registry
 - Chunked corpus schema
@@ -14,14 +16,13 @@ Platform config system ready for merge review.
 - Embedding schema and artifact read/write
 - Embedding runner with injectable client and separate source/output stores
 - HTTP embedding client
-- HTTP embedding request payload fix merged on `main`
-- Multi-endpoint embedding config
 - Multi-endpoint embedding consistency pre-check helper
-- Embedding provenance endpoint and consistency metadata
-- Raw dataset artifact schema and import helpers
-- Raw snapshot to normalized dataset API for IFIRNFCorpus
-- Unified platform config schema, loader, and redacted dump
-- Minimal `config-show` CLI
+- Platform config system
+- Shard-aware `chunked_corpus` artifact layout
+- Shard-aware `embeddings` artifact layout aligned to source chunk shards
+- Stream-oriented `iter_chunk_shards(...)` / `iter_embedding_shards(...)`
+- Stream-oriented embedding shard writer without full-corpus accumulation
+- Reusable progress reporter for raw-to-normalized / chunking / embedding
 
 ## In Progress
 
@@ -29,11 +30,13 @@ Platform config system ready for merge review.
 
 ## Not Implemented
 
-- Milvus index builder
-- ES index builder
+- Corpus build runner
+- Milvus ingest
+- ES ingest
 - Retrieval pipeline
 - Metrics and reports
 - Frontend dashboard
- 
+
 ## Next Task
-Open and merge platform config PR, then start config-backed corpus build runner wiring.
+
+Open and merge shard-aware artifact PR, then start Milvus ingest on top of shard zip join.

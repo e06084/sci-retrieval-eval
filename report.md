@@ -6,8 +6,8 @@
 
 ## 1. 任务信息
 
-- 任务名：开发全局 config 系统
-- 当前分支：`feat/platform-config-system`
+- 任务名：chunked_corpus / embeddings artifact 支持 shard-aware 对齐
+- 当前分支：`feat/sharded-corpus-artifacts`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-26
 - 完成时间：2026-05-26
@@ -15,47 +15,85 @@
 ## 2. 本次改动
 
 - 改了什么：
-  - 新增 `src/eval_platform/config/`
-    - `schema.py`
-    - `load.py`
-    - `redaction.py`
-    - `__init__.py`
-  - 更新 `src/eval_platform/cli/main.py`
-    - 新增 `config-show`
-  - 新增 `tests/config/`
-    - `test_load.py`
-    - `test_redaction.py`
-  - 扩展 `tests/test_cli.py`
-    - 验证 redacted JSON 输出
-    - 验证 CLI override 优先级
-  - 新增 `config.example.yaml`
-  - 更新 `.gitignore`
-    - 忽略 `config.yaml`
-    - 忽略 `config.local.yaml`
-    - 忽略 `*.secret.yaml`
-  - 新增 ADR `docs/decisions/0013-platform-config-system.md`
+  - 返工 `src/eval_platform/chunking/artifact.py`
+    - `iter_chunk_shards(...)` 从返回 `list[...]` 改成真正的惰性 iterator
+    - 每次只读取一个 chunk shard 文件
+  - 返工 `src/eval_platform/embeddings/artifact.py`
+    - `iter_embedding_shards(...)` 从返回 `list[...]` 改成真正的惰性 iterator
+    - 新增 `write_embedding_shards_artifact(...)`
+    - embedding shard 可以逐 shard 写入，不再要求先构造全量 `EmbeddedCorpus`
+  - 返工 `src/eval_platform/embeddings/runner.py`
+    - 移除对 `read_chunked_corpus_artifact(...)` 的全量依赖
+    - 移除累计全部 embedding records 后再写 artifact 的路径
+    - 改为逐 shard 读取 source chunk、逐 shard 生成 embedding、逐 shard 落盘
+  - 新增 `src/eval_platform/chunking/progress.py`
+    - 定义 `ProgressEvent`
+    - 定义 `ProgressReporter`
+    - 定义 `report_progress(...)`
+  - 更新 `src/eval_platform/chunking/artifact.py`
+    - `write_chunked_corpus_artifact(...)` 支持 `file_record_num`
+    - 新增 `ChunkShardDescriptor`
+    - 新增 `ChunkShard`
+    - 新增 `build_chunk_shards(...)`
+    - 新增 `iter_chunk_shards(...)`
+    - chunk manifest / files 补 `sha256`
+  - 更新 `src/eval_platform/chunking/runner.py`
+    - `ChunkingRunConfig` 新增 `file_record_num`
+    - `run_chunking(...)` 支持 progress reporter
+  - 更新 `src/eval_platform/chunking/__init__.py`
+    - 导出 shard / progress 相关公共接口
+  - 更新 `src/eval_platform/embeddings/artifact.py`
+    - `write_embeddings_artifact(...)` 支持 shard-aware 输出
+    - 新增 `EmbeddingShardDescriptor`
+    - 新增 `EmbeddingShard`
+    - 新增 `iter_embedding_shards(...)`
+    - embedding manifest / files 补 `sha256`
+  - 更新 `src/eval_platform/embeddings/runner.py`
+    - `run_embedding(...)` 按 source chunk shard 对齐输出
+    - 支持 batch 级和 shard 级 progress reporter
+  - 更新 `src/eval_platform/embeddings/__init__.py`
+    - 导出 shard 相关公共接口
+  - 更新 `src/eval_platform/datasets/raw_normalize.py`
+    - `normalize_raw_dataset_artifact(...)` 支持 progress reporter
+  - 扩展测试：
+    - `tests/chunking/test_artifact.py`
+    - `tests/chunking/test_runner.py`
+    - `tests/embeddings/test_artifact.py`
+    - `tests/embeddings/test_runner.py`
+    - `tests/datasets/test_raw_normalize.py`
+  - 新增 ADR：
+    - `docs/decisions/0014-sharded-corpus-artifacts.md`
+  - 更新：
+    - `docs/ai/current_status.md`
+    - `report.md`
 - 为什么这样改：
-  - 配置来源现在分散在 YAML、环境变量 helper 和后续 runner 需求之间，缺少统一入口。
-  - 用户明确要求配置优先级可复现，并且不支持环境变量隐式覆盖。
+  - 当前 `chunked_corpus` 和 `embeddings` 默认都是单文件。
+  - 大 corpus 下，后续 Milvus ingest 如果需要按 `chunk_id` 对齐 chunk 和 embedding，会被迫全量加载两份大文件，内存压力很大。
+  - 用户要求 chunk shard 按 source doc 数切分，并让 embedding shard 与之逐 shard 对齐，为后续流式 zip join 做准备。
+  - 上一版已经完成 shard 文件布局，但 `iter_*_shards(...)` 和 `run_embedding(...)` 仍然会全量加载；这轮返工的目标是把对下游关键的读取与写入路径改成真正流式。
 - 没改什么：
-  - 没有实现 corpus build runner
-  - 没有改 raw-to-normalized / chunk / embedding 的业务逻辑
-  - 没有接真实 S3 / ES / Milvus / embedding API
+  - 没有实现 Milvus ingest
+  - 没有实现 ES ingest
+  - 没有实现正式 corpus build runner
+  - 没有接真实 embedding API
+  - 没有改 raw_dataset / normalized_dataset artifact 格式
 
 ## 3. 涉及文件
 
-- `.gitignore`
-- `config.example.yaml`
-- `src/eval_platform/config/__init__.py`
-- `src/eval_platform/config/schema.py`
-- `src/eval_platform/config/load.py`
-- `src/eval_platform/config/redaction.py`
-- `src/eval_platform/cli/main.py`
-- `tests/config/__init__.py`
-- `tests/config/test_load.py`
-- `tests/config/test_redaction.py`
-- `tests/test_cli.py`
-- `docs/decisions/0013-platform-config-system.md`
+- `src/eval_platform/chunking/__init__.py`
+- `src/eval_platform/chunking/artifact.py`
+- `src/eval_platform/chunking/progress.py`
+- `src/eval_platform/chunking/runner.py`
+- `src/eval_platform/embeddings/__init__.py`
+- `src/eval_platform/embeddings/artifact.py`
+- `src/eval_platform/embeddings/runner.py`
+- `src/eval_platform/datasets/raw_normalize.py`
+- `tests/chunking/test_artifact.py`
+- `tests/chunking/test_runner.py`
+- `tests/embeddings/test_artifact.py`
+- `tests/embeddings/test_runner.py`
+- `tests/datasets/test_raw_normalize.py`
+- `docs/decisions/0014-sharded-corpus-artifacts.md`
 - `docs/ai/current_status.md`
 - `report.md`
 
@@ -66,116 +104,251 @@
 
 ## 4. 实现说明
 
-### 4.1 配置优先级如何实现
+### 4.1 sharding 语义
 
-`load_platform_config(...)` 固定实现：
-
-```text
-代码默认值 < config.yaml < CLI 参数
-```
-
-实现步骤：
-
-1. 先构造 `PlatformConfig()` 默认值。
-2. 如果提供 `config_path`，加载 YAML 并做 deep merge。
-3. 如果提供 `cli_overrides`，再做一次 deep merge。
-4. 最终用 `PlatformConfig.model_validate(...)` 输出强类型对象。
-
-### 4.2 为什么不支持环境变量覆盖
-
-本轮 loader 完全不读取 `os.environ`：
-
-1. 不做环境变量 override
-2. 不做 `${VAR}` expansion
-3. 不把环境变量作为优先级层
-
-原因：
-
-1. 用户明确要求不要有环境变量隐式覆盖。
-2. 只有 config 文件和 CLI 参数，实验配置才能被稳定还原。
-3. 私密配置如果需要注入，也应通过本地 YAML 文件路径显式传入。
-
-### 4.3 schema 覆盖的顶层配置块
-
-第一版 `PlatformConfig` 覆盖：
-
-1. `s3`
-2. `elasticsearch`
-3. `milvus`
-4. `embedding`
-5. `rerank`
-6. `search_runtime`
-7. `raw_sources`
-8. `chunking`
-
-其中：
-
-1. `PlatformConfig()` 可直接构造
-2. 外部依赖字段大多允许为 `None`
-3. `raw_sources` 可表达 `IFIRNFCorpus -> s3://.../raw/ifir_nfcorpus/`
-
-### 4.4 deep merge 规则
-
-`deep_merge_config(...)` 规则：
-
-1. dict：递归合并
-2. list：整体替换
-3. scalar：覆盖
-4. `None`：显式覆盖为 `None`
-
-这保证：
-
-1. YAML 可以覆盖默认值
-2. CLI 可以覆盖 YAML
-3. nested dict 可局部覆盖
-4. `embedding.endpoints` 这种 list 不会做逐项拼接
-
-### 4.5 redaction 规则
-
-`dump_redacted_config(...)` 会遮蔽字段名包含以下 token 的值：
-
-1. `password`
-2. `secret`
-3. `access_key`
-4. `api_key`
-5. `token`
-
-遮蔽值统一为：
+本轮新增配置：
 
 ```text
-"***"
+file_record_num
 ```
 
-支持 nested dict / list，包括：
+语义固定为：
 
-1. `embedding.endpoints[].api_key`
-2. `search_runtime.rewrite.api_key`
-3. `s3.secret_access_key`
-
-### 4.6 CLI 是否接入
-
-本轮已接入最小 CLI：
-
-```bash
-evalctl config-show --config path/to/config.yaml
+```text
+每个 chunk shard 包含多少个切分前 source doc
 ```
 
-行为：
+不是：
 
-1. 默认输出 redacted JSON
-2. 支持示例 override：
-   - `--s3-prefix`
-   - `--embedding-batch-size`
-3. 不读取环境变量
+```text
+每个 shard 包含多少个 chunk
+```
+
+具体行为：
+
+1. 先按 `doc_id` 的连续输出段聚合 chunk。
+2. 每 `file_record_num` 个 source doc 聚成一个 shard。
+3. 同一个 source doc 产生的多个 chunk 不会跨 shard。
+4. shard 内 chunk 顺序保持 chunker 原输出顺序。
+5. 不传 `file_record_num` 时，保持旧单文件行为。
+
+### 4.2 新旧 artifact 格式兼容
+
+`chunked_corpus`：
+
+- 旧格式：
+
+```text
+chunked_corpus/<artifact_id>/chunks.jsonl
+```
+
+- 新格式：
+
+```text
+chunked_corpus/<artifact_id>/chunks/part-00000.jsonl
+chunked_corpus/<artifact_id>/chunks/part-00001.jsonl
+...
+```
+
+`embeddings`：
+
+- 旧格式：
+
+```text
+embeddings/<artifact_id>/embeddings.jsonl
+```
+
+- 新格式：
+
+```text
+embeddings/<artifact_id>/embeddings/part-00000.jsonl
+embeddings/<artifact_id>/embeddings/part-00001.jsonl
+...
+```
+
+兼容策略：
+
+1. writer 在未启用 sharding 时继续写旧单文件。
+2. reader 通过同名函数兼容读取新旧两种布局：
+   - `read_chunked_corpus_artifact(...)`
+   - `read_embeddings_artifact(...)`
+3. 新增流式 shard 读取 helper：
+   - `iter_chunk_shards(...)`
+   - `iter_embedding_shards(...)`
+
+需要特别说明：
+
+1. `read_chunked_corpus_artifact(...)`
+2. `read_embeddings_artifact(...)`
+
+为了兼容旧调用方，仍然是**全量 in-memory 读取 API**。
+
+真正给后续 ingest 用的流式接口是：
+
+1. `iter_chunk_shards(...)`
+2. `iter_embedding_shards(...)`
+
+### 4.3 embedding 如何和 chunk shard 对齐
+
+`run_embedding(...)` 在返工后不再走“先全量读 source，再全量攒 embedding”的路径。
+
+新的对齐策略：
+
+1. 先按 `iter_chunk_shards(...)` 惰性读取 source chunk shard。
+2. 每个 chunk shard 内按 batch 调 `client.embed_texts(...)`。
+3. 当前 shard 生成的 embedding 只写入对应 embedding shard。
+4. 同一 shard 内逐行保持：
+   - `chunk_id` 一致
+   - `doc_id` 一致
+   - 顺序一致
+5. 每个 embedding shard 在当前 shard 完成后立即写入 store。
+6. 最后只基于计数和 shard descriptor 汇总 manifest，不再保留全量向量列表。
+
+这保证后续 ingest 可以逐 shard 做流式 zip join。
+
+### 4.4 manifest 新增字段
+
+chunk manifest 新增：
+
+1. `sharding`
+2. `shards`
+3. `files[].sha256`
+
+其中每个 chunk shard 记录：
+
+1. `path`
+2. `source_doc_count`
+3. `chunk_count`
+4. `first_chunk_id`
+5. `last_chunk_id`
+6. `sha256`
+
+embedding manifest 新增：
+
+1. `source_chunked_corpus_artifact_id`
+2. `alignment_key`
+3. `alignment_order`
+4. `sharding`
+5. `shards`
+6. `files[].sha256`
+
+其中每个 embedding shard 记录：
+
+1. `source_chunk_file`
+2. `embedding_file`
+3. `source_chunk_count`
+4. `embedding_count`
+5. `first_chunk_id`
+6. `last_chunk_id`
+7. `sha256`
+
+### 4.5 sha256 如何计算和校验
+
+本轮对 shard 文件都补了 `sha256`：
+
+1. 先把 JSONL 文本编码成 `bytes`
+2. 对完整字节流做 `sha256`
+3. 同时写入：
+   - `manifest.files[].sha256`
+   - `manifest.metadata.shards[].sha256`
+
+单文件旧布局也一并补了 `sha256`，不是只在新 shard 文件上支持。
+
+### 4.6 progress reporter 设计与支持范围
+
+新增通用接口：
+
+```python
+class ProgressEvent(BaseModel):
+    stage: str
+    current: int
+    total: int | None = None
+    message: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+```
+
+以及：
+
+```python
+ProgressReporter = Callable[[ProgressEvent], None]
+```
+
+当前支持阶段：
+
+1. raw-to-normalized
+   - `stage="raw_to_normalized"`
+   - 至少汇报：
+     - corpus
+     - queries
+     - instructions
+     - qrels
+2. chunking
+   - `stage="chunking"`
+   - 汇报：
+     - source doc 完成事件
+     - shard 预写入事件
+3. embedding
+   - `stage="embedding"`
+   - 汇报：
+     - batch 完成事件
+     - shard 完成事件
+
+事件 `metadata.kind`：
+
+1. `corpus`
+2. `queries`
+3. `instructions`
+4. `qrels`
+5. `source_doc`
+6. `shard`
+7. `batch`
+
+后续 CLI runner 接入方式：
+
+1. 在 runner 外层传入 `progress_reporter`
+2. CLI 只需把 `ProgressEvent` 映射成日志 / 进度条
+3. artifact 内容和 manifest 不需要关心 CLI 展示逻辑
+
+### 4.7 本轮返工后哪些 API 是流式
+
+真正流式：
+
+1. `iter_chunk_shards(...)`
+2. `iter_embedding_shards(...)`
+3. `run_embedding(...)` 的 source chunk 消费路径
+4. `write_embedding_shards_artifact(...)`
+
+仍然是兼容性全量 API：
+
+1. `read_chunked_corpus_artifact(...)`
+2. `read_embeddings_artifact(...)`
+3. `write_embeddings_artifact(...)`
+
+### 4.8 reporter 异常时的行为
+
+progress callback 默认不传时行为不变。
+
+如果 callback 抛异常：
+
+1. raw-to-normalized 会直接失败
+2. chunking 会直接失败
+3. embedding 会直接失败
+
+并且测试已覆盖：
+
+```text
+不会写出 _SUCCESS
+```
+
+这满足任务单要求的“进度回调不能制造伪成功 artifact”。
 
 ## 5. 自检结果
 
 ### 5.1 必跑命令
 
 ```bash
-git status --short
-git diff --name-only origin/main...HEAD
-pytest tests/config tests/test_cli.py
+pytest tests/datasets/test_raw_normalize.py
+pytest tests/chunking tests/embeddings
 ruff check .
 mypy .
 pytest
@@ -183,37 +356,35 @@ pytest
 
 ### 5.2 输出摘要
 
-- `git status --short`：
-  - 开发完成前只包含允许范围内文件改动
-- `git diff --name-only origin/main...HEAD`：
-  - 不包含 `chunking/`、`datasets/`、`embeddings/`、`indexes/`、`retrieval/`、`metrics/`
-- `pytest tests/config tests/test_cli.py`：
-  - 通过，`13 passed`
+- `pytest tests/datasets/test_raw_normalize.py`：
+  - 通过，`7 passed`
+- `pytest tests/chunking tests/embeddings`：
+  - 通过，`224 passed`
 - `ruff check .`：
   - 通过
 - `mypy .`：
-  - 通过，`Success: no issues found in 91 source files`
+  - 通过，`Success: no issues found in 98 source files`
 - `pytest`：
-  - 通过，`354 passed`
-
-### 5.3 提交信息
-
-- 是否已提交：`yes`
-- commit subject：`Harden platform config validation`
-- 验收者确认的最终 commit：
+  - 通过，`376 passed`
 
 ## 6. 风险与未决项
 
 - 已知风险：
-  - 旧的 `http_embedding_client_from_env(...)` 仍然存在于 embeddings 模块中；本轮没有删除，只是不把它接入新 config 系统
+  - `run_chunking(...)` 仍然会先把所有 chunk 收到内存里，再统一写 shard；这已经足够支撑 shard-aware artifact，但还不是最终的流式 chunk writer
 - 未覆盖场景：
-  - 还没有把新 config 系统接到 corpus build runner / raw opener / embedding runner 的真实业务入口
+  - 本轮没有实现正式 Milvus ingest，因此还没有真实验证 shard zip join 的下游消费
 - 需要验收者重点检查的点：
-  - `config.example.yaml` 的字段覆盖范围是否足够支撑下一阶段
-  - CLI 是否只做了最小配置展示，而没有越界做业务 runner
+  - `file_record_num` 的语义是否足够清晰，是否完全按 source doc 数而不是 chunk 数切分
+  - shard manifest 字段是否已足够支撑后续 Milvus 流式 ingest
 
 ## 7. 交付结论
 
 - 是否建议验收：`yes`
 - 是否建议合并：`yes`
 - 如果不能合并，卡点是什么：无
+
+## 8. 提交信息
+
+- 是否已提交：`yes`
+- commit subject：`Stream shard readers and embedding writer`
+- 验收者确认的最终 commit：

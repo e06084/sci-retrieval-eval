@@ -14,6 +14,7 @@ from eval_platform.chunking import (
     CHUNKED_CORPUS_ARTIFACT_TYPE,
     CHUNKS_FILENAME,
     ChunkRecord,
+    ProgressEvent,
     read_chunked_corpus_artifact,
     run_chunking,
 )
@@ -79,6 +80,29 @@ class FakeChunker:
             )
             for doc in dataset.corpus
         ]
+
+
+class MultiChunkPerDocChunker:
+    def chunk_corpus(self, dataset: NormalizedDataset) -> Iterable[ChunkRecord]:
+        chunks: list[ChunkRecord] = []
+        for doc in dataset.corpus:
+            chunks.extend(
+                [
+                    ChunkRecord(
+                        chunk_id=f"{doc.doc_id}-0",
+                        doc_id=doc.doc_id,
+                        text=f"chunk-0 from {doc.doc_id}",
+                        chunk_index=0,
+                    ),
+                    ChunkRecord(
+                        chunk_id=f"{doc.doc_id}-1",
+                        doc_id=doc.doc_id,
+                        text=f"chunk-1 from {doc.doc_id}",
+                        chunk_index=1,
+                    ),
+                ]
+            )
+        return chunks
 
 
 @pytest.fixture
@@ -217,6 +241,70 @@ def test_run_chunking_calls_fake_chunker_once(
     assert chunker.call_count == 1
 
 
+def test_run_chunking_shards_by_source_doc_count(
+    store: LocalArtifactStore,
+    git_repo: Path,
+    source_artifact_id: str,
+) -> None:
+    config = _run_config(source_artifact_id, git_repo)
+    config.file_record_num = 1
+
+    manifest = run_chunking(store, config, MultiChunkPerDocChunker())
+
+    assert manifest.metadata["sharding"]["enabled"] is True
+    assert len(manifest.metadata["shards"]) == 2
+    assert manifest.metadata["shards"][0]["source_doc_count"] == 1
+    assert manifest.metadata["shards"][0]["chunk_count"] == 2
+    assert manifest.metadata["shards"][1]["source_doc_count"] == 1
+    assert manifest.metadata["shards"][1]["chunk_count"] == 2
+
+
+def test_run_chunking_reports_doc_and_shard_progress(
+    store: LocalArtifactStore,
+    git_repo: Path,
+    source_artifact_id: str,
+) -> None:
+    config = _run_config(source_artifact_id, git_repo)
+    config.file_record_num = 1
+    events: list[ProgressEvent] = []
+
+    run_chunking(
+        store,
+        config,
+        MultiChunkPerDocChunker(),
+        progress_reporter=events.append,
+    )
+
+    doc_events = [event for event in events if event.metadata.get("kind") == "source_doc"]
+    shard_events = [event for event in events if event.metadata.get("kind") == "shard"]
+    assert [event.current for event in doc_events] == [1, 2]
+    assert doc_events[0].total == 2
+    assert [event.metadata["shard_id"] for event in shard_events] == ["part-00000", "part-00001"]
+
+
+def test_run_chunking_progress_reporter_failure_does_not_write_success(
+    store: LocalArtifactStore,
+    git_repo: Path,
+    source_artifact_id: str,
+) -> None:
+    config = _run_config(source_artifact_id, git_repo)
+    config.file_record_num = 1
+
+    def failing_reporter(_: ProgressEvent) -> None:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_chunking(
+            store,
+            config,
+            MultiChunkPerDocChunker(),
+            progress_reporter=failing_reporter,
+        )
+
+    assert store.is_complete(CHUNKED_CORPUS_ARTIFACT_TYPE, "litsearch_test_chunks") is False
+    assert not store.exists(CHUNKED_CORPUS_ARTIFACT_TYPE, "litsearch_test_chunks", CHUNKS_FILENAME)
+
+
 @pytest.mark.parametrize(
     ("field_name", "value"),
     [
@@ -269,6 +357,17 @@ def test_chunking_run_config_default_dicts_are_independent() -> None:
     assert first.metadata == {"pipeline_step": "chunk"}
     assert second.chunk_params == {"max_tokens": 256}
     assert second.metadata == {"pipeline_step": "other"}
+
+
+def test_chunking_run_config_rejects_non_positive_file_record_num() -> None:
+    with pytest.raises(ValidationError):
+        ChunkingRunConfig(
+            source_artifact_id="source-a",
+            output_artifact_id="output-a",
+            chunker_name="chunker-a",
+            chunker_repo_path="/tmp/chunker-a",
+            file_record_num=0,
+        )
 
 
 def test_external_chunker_protocol_is_structural() -> None:

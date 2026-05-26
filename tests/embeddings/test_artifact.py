@@ -19,7 +19,10 @@ from eval_platform.embeddings import (
     EmbeddingArtifactError,
     EmbeddingProvenance,
     EmbeddingRecord,
+    EmbeddingShard,
+    iter_embedding_shards,
     read_embeddings_artifact,
+    write_embedding_shards_artifact,
     write_embeddings_artifact,
 )
 
@@ -27,6 +30,16 @@ from eval_platform.embeddings import (
 @pytest.fixture
 def store(tmp_path: Path) -> LocalArtifactStore:
     return LocalArtifactStore(tmp_path)
+
+
+class CountingLocalArtifactStore(LocalArtifactStore):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.get_file_calls: list[str] = []
+
+    def get_file(self, artifact_type: str, artifact_id: str, relative_path: str) -> bytes:
+        self.get_file_calls.append(relative_path)
+        return super().get_file(artifact_type, artifact_id, relative_path)
 
 
 def _sample_embedded_corpus() -> EmbeddedCorpus:
@@ -63,6 +76,7 @@ def test_write_embeddings_artifact_writes_embeddings_jsonl(store: LocalArtifactS
     assert "vector_b64" in text
     assert '"vector":' not in text
     assert any(file.path == EMBEDDINGS_FILENAME for file in manifest.files)
+    assert manifest.files[0].sha256 is not None
 
 
 def test_write_embeddings_artifact_marks_complete(store: LocalArtifactStore) -> None:
@@ -232,3 +246,184 @@ def test_read_embeddings_artifact_strips_system_metadata(store: LocalArtifactSto
     )
     loaded = read_embeddings_artifact(store, "litsearch_embeddings")
     assert loaded.metadata == {"source": "unit-test", "stage": "embed"}
+
+
+def test_write_embeddings_artifact_supports_sharded_layout(store: LocalArtifactStore) -> None:
+    embeddings = _sample_embedded_corpus()
+    manifest = write_embeddings_artifact(
+        store,
+        "litsearch_embeddings",
+        embeddings,
+        provenance=_sample_provenance(),
+        source_artifact_id="litsearch_chunks",
+        shards=[
+            EmbeddingShard(
+                shard_id="part-00000",
+                source_chunk_file="chunks/part-00000.jsonl",
+                embedding_file="embeddings/part-00000.jsonl",
+                source_chunk_count=2,
+                embedding_count=2,
+                embeddings=embeddings.embeddings[:2],
+            ),
+            EmbeddingShard(
+                shard_id="part-00001",
+                source_chunk_file="chunks/part-00001.jsonl",
+                embedding_file="embeddings/part-00001.jsonl",
+                source_chunk_count=1,
+                embedding_count=1,
+                embeddings=embeddings.embeddings[2:],
+            ),
+        ],
+    )
+
+    assert manifest.metadata["sharding"]["enabled"] is True
+    assert len(manifest.metadata["shards"]) == 2
+    assert manifest.metadata["source_chunked_corpus_artifact_id"] == "litsearch_chunks"
+    assert store.exists("embeddings", "litsearch_embeddings", "embeddings/part-00000.jsonl")
+    assert store.exists("embeddings", "litsearch_embeddings", "embeddings/part-00001.jsonl")
+    assert not store.exists("embeddings", "litsearch_embeddings", EMBEDDINGS_FILENAME)
+
+
+def test_iter_embedding_shards_reads_in_manifest_order(store: LocalArtifactStore) -> None:
+    embeddings = _sample_embedded_corpus()
+    write_embeddings_artifact(
+        store,
+        "litsearch_embeddings",
+        embeddings,
+        provenance=_sample_provenance(),
+        source_artifact_id="litsearch_chunks",
+        shards=[
+            EmbeddingShard(
+                shard_id="part-00000",
+                source_chunk_file="chunks/part-00000.jsonl",
+                embedding_file="embeddings/part-00000.jsonl",
+                source_chunk_count=2,
+                embedding_count=2,
+                embeddings=embeddings.embeddings[:2],
+            ),
+            EmbeddingShard(
+                shard_id="part-00001",
+                source_chunk_file="chunks/part-00001.jsonl",
+                embedding_file="embeddings/part-00001.jsonl",
+                source_chunk_count=1,
+                embedding_count=1,
+                embeddings=embeddings.embeddings[2:],
+            ),
+        ],
+    )
+
+    shards = list(iter_embedding_shards(store, "litsearch_embeddings"))
+
+    assert [shard.shard_id for shard in shards] == ["part-00000", "part-00001"]
+    assert [record.chunk_id for record in shards[0].embeddings] == ["chunk-1", "chunk-2"]
+    assert [record.chunk_id for record in shards[1].embeddings] == ["chunk-3"]
+
+
+def test_iter_embedding_shards_is_lazy(tmp_path: Path) -> None:
+    store = CountingLocalArtifactStore(tmp_path)
+    embeddings = _sample_embedded_corpus()
+    write_embeddings_artifact(
+        store,
+        "litsearch_embeddings",
+        embeddings,
+        provenance=_sample_provenance(),
+        source_artifact_id="litsearch_chunks",
+        shards=[
+            EmbeddingShard(
+                shard_id="part-00000",
+                source_chunk_file="chunks/part-00000.jsonl",
+                embedding_file="embeddings/part-00000.jsonl",
+                source_chunk_count=2,
+                embedding_count=2,
+                embeddings=embeddings.embeddings[:2],
+            ),
+            EmbeddingShard(
+                shard_id="part-00001",
+                source_chunk_file="chunks/part-00001.jsonl",
+                embedding_file="embeddings/part-00001.jsonl",
+                source_chunk_count=1,
+                embedding_count=1,
+                embeddings=embeddings.embeddings[2:],
+            ),
+        ],
+    )
+
+    shard_iter = iter_embedding_shards(store, "litsearch_embeddings")
+
+    assert not isinstance(shard_iter, list)
+    assert store.get_file_calls == []
+
+    first_shard = next(shard_iter)
+    assert first_shard.shard_id == "part-00000"
+    assert store.get_file_calls == ["embeddings/part-00000.jsonl"]
+
+    second_shard = next(shard_iter)
+    assert second_shard.shard_id == "part-00001"
+    assert store.get_file_calls == [
+        "embeddings/part-00000.jsonl",
+        "embeddings/part-00001.jsonl",
+    ]
+
+
+def test_write_embedding_shards_artifact_writes_first_shard_before_second_generation(
+    store: LocalArtifactStore,
+) -> None:
+    provenance = _sample_provenance()
+
+    class RecordingShardIterable:
+        def __init__(self) -> None:
+            self.index = 0
+
+        def __iter__(self) -> "RecordingShardIterable":
+            return self
+
+        def __next__(self) -> EmbeddingShard:
+            if self.index == 0:
+                self.index += 1
+                return EmbeddingShard(
+                    shard_id="part-00000",
+                    source_chunk_file="chunks/part-00000.jsonl",
+                    embedding_file="embeddings/part-00000.jsonl",
+                    source_chunk_count=1,
+                    embedding_count=1,
+                    embeddings=[
+                        EmbeddingRecord(
+                            chunk_id="chunk-1",
+                            doc_id="doc-1",
+                            vector=[0.1, 0.2],
+                        )
+                    ],
+                )
+            if self.index == 1:
+                assert store.exists(
+                    "embeddings",
+                    "litsearch_embeddings",
+                    "embeddings/part-00000.jsonl",
+                )
+                self.index += 1
+                return EmbeddingShard(
+                    shard_id="part-00001",
+                    source_chunk_file="chunks/part-00001.jsonl",
+                    embedding_file="embeddings/part-00001.jsonl",
+                    source_chunk_count=1,
+                    embedding_count=1,
+                    embeddings=[
+                        EmbeddingRecord(
+                            chunk_id="chunk-2",
+                            doc_id="doc-2",
+                            vector=[0.3, 0.4],
+                        )
+                    ],
+                )
+            raise StopIteration
+
+    manifest = write_embedding_shards_artifact(
+        store,
+        "litsearch_embeddings",
+        RecordingShardIterable(),
+        provenance=provenance,
+        source_artifact_id="litsearch_chunks",
+    )
+
+    assert manifest.metadata["embedding_count"] == 2
+    assert store.is_complete("embeddings", "litsearch_embeddings") is True

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from eval_platform.artifacts import LocalArtifactStore
+from eval_platform.chunking.progress import ProgressEvent
 from eval_platform.datasets import (
     NORMALIZED_DATASET_ARTIFACT_TYPE,
     RAW_DATASET_ARTIFACT_TYPE,
@@ -234,3 +235,60 @@ def test_s3_raw_file_opener_rejects_invalid_uri() -> None:
 
     with pytest.raises(RawNormalizeError, match="Unsupported raw file URI"):
         opener.open("file:///tmp/not-s3.jsonl")
+
+
+def test_normalize_raw_dataset_artifact_reports_progress(
+    store: LocalArtifactStore,
+) -> None:
+    snapshot, opener = _ifir_nfcorpus_snapshot()
+    write_raw_dataset_artifact(store, "raw_ifir_nfcorpus_001", snapshot)
+    events: list[ProgressEvent] = []
+
+    normalize_raw_dataset_artifact(
+        store,
+        store,
+        RawToNormalizedConfig(
+            source_artifact_id="raw_ifir_nfcorpus_001",
+            output_artifact_id="normalized_ifir_nfcorpus_001",
+            dataset_name="IFIRNFCorpus",
+        ),
+        opener=opener,
+        progress_reporter=events.append,
+    )
+
+    assert [event.metadata["kind"] for event in events] == [
+        "corpus",
+        "queries",
+        "instructions",
+        "qrels",
+    ]
+    assert events[-1].current == 4
+    assert events[-1].total == 4
+
+
+def test_normalize_raw_dataset_artifact_reporter_failure_does_not_write_success(
+    store: LocalArtifactStore,
+) -> None:
+    snapshot, opener = _ifir_nfcorpus_snapshot()
+    write_raw_dataset_artifact(store, "raw_ifir_nfcorpus_001", snapshot)
+
+    def failing_reporter(_: ProgressEvent) -> None:
+        raise RuntimeError("progress failed")
+
+    with pytest.raises(RuntimeError, match="progress failed"):
+        normalize_raw_dataset_artifact(
+            store,
+            store,
+            RawToNormalizedConfig(
+                source_artifact_id="raw_ifir_nfcorpus_001",
+                output_artifact_id="normalized_ifir_nfcorpus_001",
+                dataset_name="IFIRNFCorpus",
+            ),
+            opener=opener,
+            progress_reporter=failing_reporter,
+        )
+
+    assert (
+        store.is_complete(NORMALIZED_DATASET_ARTIFACT_TYPE, "normalized_ifir_nfcorpus_001")
+        is False
+    )

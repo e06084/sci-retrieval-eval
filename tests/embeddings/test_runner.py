@@ -6,8 +6,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import eval_platform.embeddings.runner as runner_module
 from eval_platform.artifacts import LocalArtifactStore
-from eval_platform.chunking import ChunkRecord, write_chunked_corpus_artifact
+from eval_platform.chunking import (
+    ChunkRecord,
+    ProgressEvent,
+    iter_chunk_shards,
+    write_chunked_corpus_artifact,
+)
 from eval_platform.chunking.schema import ChunkedCorpus
 from eval_platform.embeddings import (
     EMBEDDINGS_ARTIFACT_TYPE,
@@ -17,6 +23,7 @@ from eval_platform.embeddings import (
     EmbeddingRunConfig,
     EmbeddingRunError,
     FakeEmbeddingClient,
+    iter_embedding_shards,
     read_embeddings_artifact,
     run_embedding,
 )
@@ -259,6 +266,150 @@ def test_run_embedding_raises_when_consistency_check_failed(
 
     with pytest.raises(EmbeddingRunError, match="consistency check failed"):
         run_embedding(source_store, output_store, config, FakeEmbeddingClient(3))
+
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "litsearch_embeddings") is False
+    assert not output_store.exists(
+        EMBEDDINGS_ARTIFACT_TYPE,
+        "litsearch_embeddings",
+        EMBEDDINGS_FILENAME,
+    )
+
+
+def test_run_embedding_sharded_source_writes_aligned_embedding_shards(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    write_chunked_corpus_artifact(
+        source_store,
+        "litsearch_chunks_sharded",
+        ChunkedCorpus(
+            chunks=[
+                ChunkRecord(chunk_id="chunk-1", doc_id="doc-1", text="a", chunk_index=0),
+                ChunkRecord(chunk_id="chunk-2", doc_id="doc-1", text="b", chunk_index=1),
+                ChunkRecord(chunk_id="chunk-3", doc_id="doc-2", text="c", chunk_index=0),
+            ],
+            metadata={"source": "chunking"},
+        ),
+        file_record_num=1,
+    )
+    config = EmbeddingRunConfig(
+        source_artifact_id="litsearch_chunks_sharded",
+        output_artifact_id="litsearch_embeddings_sharded",
+        model_name="fake-embedding-model",
+        embedding_dim=3,
+        provider="fake-provider",
+    )
+
+    manifest = run_embedding(source_store, output_store, config, FakeEmbeddingClient(3))
+    loaded = read_embeddings_artifact(output_store, "litsearch_embeddings_sharded")
+    shards = iter_embedding_shards(output_store, "litsearch_embeddings_sharded")
+    source_shards = iter_chunk_shards(source_store, "litsearch_chunks_sharded")
+
+    assert manifest.metadata["sharding"]["enabled"] is True
+    assert len(manifest.metadata["shards"]) == 2
+    assert [record.chunk_id for record in loaded.embeddings] == ["chunk-1", "chunk-2", "chunk-3"]
+    for source_shard, embedding_shard in zip(source_shards, shards, strict=True):
+        assert source_shard.shard_id == embedding_shard.shard_id
+        assert [chunk.chunk_id for chunk in source_shard.chunks] == [
+            record.chunk_id for record in embedding_shard.embeddings
+        ]
+        assert [chunk.doc_id for chunk in source_shard.chunks] == [
+            record.doc_id for record in embedding_shard.embeddings
+        ]
+
+
+def test_run_embedding_reports_batch_and_shard_progress(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    events: list[ProgressEvent] = []
+    config = _config()
+    config.batch_size = 1
+
+    run_embedding(
+        source_store,
+        output_store,
+        config,
+        FakeEmbeddingClient(3),
+        progress_reporter=events.append,
+    )
+
+    batch_events = [event for event in events if event.metadata.get("kind") == "batch"]
+    shard_events = [event for event in events if event.metadata.get("kind") == "shard"]
+    assert len(batch_events) == 2
+    assert batch_events[0].metadata["shard_id"] == "part-00000"
+    assert batch_events[-1].current == 2
+    assert len(shard_events) == 1
+    assert shard_events[0].metadata["shard_id"] == "part-00000"
+
+
+def test_run_embedding_sharded_source_does_not_touch_legacy_single_file_path(
+    tmp_path: Path,
+    output_store: LocalArtifactStore,
+) -> None:
+    class RejectLegacySingleFileStore(LocalArtifactStore):
+        def get_file(self, artifact_type: str, artifact_id: str, relative_path: str) -> bytes:
+            if relative_path == "chunks.jsonl":
+                raise AssertionError("legacy single-file chunk path should not be read")
+            return super().get_file(artifact_type, artifact_id, relative_path)
+
+    source_store = RejectLegacySingleFileStore(tmp_path / "source-sharded")
+    write_chunked_corpus_artifact(
+        source_store,
+        "litsearch_chunks_sharded",
+        ChunkedCorpus(
+            chunks=[
+                ChunkRecord(chunk_id="chunk-1", doc_id="doc-1", text="a", chunk_index=0),
+                ChunkRecord(chunk_id="chunk-2", doc_id="doc-2", text="b", chunk_index=0),
+            ]
+        ),
+        file_record_num=1,
+    )
+    config = EmbeddingRunConfig(
+        source_artifact_id="litsearch_chunks_sharded",
+        output_artifact_id="litsearch_embeddings_sharded",
+        model_name="fake-embedding-model",
+        embedding_dim=3,
+    )
+
+    run_embedding(source_store, output_store, config, FakeEmbeddingClient(3))
+
+    assert output_store.is_complete("embeddings", "litsearch_embeddings_sharded") is True
+
+
+def test_run_embedding_does_not_call_full_chunked_corpus_reader(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_read(*args: object, **kwargs: object) -> object:
+        raise AssertionError("full chunked corpus reader should not be used")
+
+    monkeypatch.setattr(runner_module, "read_chunked_corpus_artifact", fail_read, raising=False)
+
+    run_embedding(source_store, output_store, _config(), FakeEmbeddingClient(3))
+
+    assert output_store.is_complete("embeddings", "litsearch_embeddings") is True
+
+
+def test_run_embedding_progress_reporter_failure_does_not_write_success(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    config = _config()
+    config.batch_size = 1
+
+    def failing_reporter(_: ProgressEvent) -> None:
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_embedding(
+            source_store,
+            output_store,
+            config,
+            FakeEmbeddingClient(3),
+            progress_reporter=failing_reporter,
+        )
 
     assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "litsearch_embeddings") is False
     assert not output_store.exists(

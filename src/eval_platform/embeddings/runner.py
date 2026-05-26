@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from eval_platform.artifacts import ArtifactManifest, ArtifactStore
-from eval_platform.chunking import read_chunked_corpus_artifact
-from eval_platform.embeddings.artifact import write_embeddings_artifact
+from eval_platform.chunking import CHUNKED_CORPUS_ARTIFACT_TYPE
+from eval_platform.chunking.artifact import iter_chunk_shards
+from eval_platform.chunking.progress import ProgressReporter, report_progress
+from eval_platform.embeddings.artifact import EmbeddingShard, write_embedding_shards_artifact
 from eval_platform.embeddings.client import EmbeddingClient
 from eval_platform.embeddings.schema import (
-    EmbeddedCorpus,
     EmbeddingConsistencyCheckResult,
     EmbeddingProvenance,
     EmbeddingRecord,
@@ -26,6 +28,26 @@ def _non_empty_string(value: str, field_name: str) -> str:
 
 class EmbeddingRunError(Exception):
     """Raised when embedding runner validation fails."""
+
+
+def _batched_texts(texts: list[str], batch_size: int) -> list[list[str]]:
+    return [texts[index : index + batch_size] for index in range(0, len(texts), batch_size)]
+
+
+def _source_user_metadata(source_manifest_metadata: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in source_manifest_metadata.items()
+        if key
+        not in {
+            "chunk_count",
+            "unique_doc_count",
+            "chunker",
+            "chunk_params",
+            "sharding",
+            "shards",
+        }
+    }
 
 
 class EmbeddingRunConfig(BaseModel):
@@ -70,6 +92,8 @@ def run_embedding(
     output_store: ArtifactStore,
     config: EmbeddingRunConfig,
     client: EmbeddingClient,
+    *,
+    progress_reporter: ProgressReporter | None = None,
 ) -> ArtifactManifest:
     """Read chunked corpus, compute embeddings, and write an embeddings artifact."""
     endpoint_ids = list(config.endpoint_ids)
@@ -83,38 +107,17 @@ def run_embedding(
     if config.consistency_check is not None and config.consistency_check.passed is False:
         raise EmbeddingRunError("Embedding consistency check failed; refusing to write artifact")
 
-    chunked_corpus = read_chunked_corpus_artifact(source_store, config.source_artifact_id)
-    texts = [chunk.text for chunk in chunked_corpus.chunks]
-    vectors = client.embed_texts(texts)
-
-    if len(vectors) != len(chunked_corpus.chunks):
-        raise EmbeddingRunError("Embedding client returned a different number of vectors")
-
-    records: list[EmbeddingRecord] = []
-    for chunk, vector in zip(chunked_corpus.chunks, vectors, strict=True):
-        if len(vector) != config.embedding_dim:
-            raise EmbeddingRunError("Embedding client returned vectors with unexpected dimension")
-        record_metadata = dict(chunk.metadata)
-        if chunk.title is not None:
-            record_metadata["title"] = chunk.title
-        record_metadata["chunk_index"] = chunk.chunk_index
-        if chunk.start_offset is not None:
-            record_metadata["start_offset"] = chunk.start_offset
-        if chunk.end_offset is not None:
-            record_metadata["end_offset"] = chunk.end_offset
-        records.append(
-            EmbeddingRecord(
-                chunk_id=chunk.chunk_id,
-                doc_id=chunk.doc_id,
-                vector=vector,
-                metadata=record_metadata,
-            )
-        )
-
-    embedded_corpus = EmbeddedCorpus(
-        embeddings=records,
-        metadata=dict(chunked_corpus.metadata),
+    source_manifest = source_store.read_manifest(
+        CHUNKED_CORPUS_ARTIFACT_TYPE,
+        config.source_artifact_id,
     )
+    source_sharding = source_manifest.metadata.get("sharding", {})
+    shard_total = (
+        len(source_manifest.metadata.get("shards", []))
+        if source_sharding.get("enabled")
+        else 1
+    )
+    batch_size = config.batch_size or 0
 
     runtime_parameters: dict[str, Any] = {}
     if config.batch_size is not None:
@@ -132,16 +135,109 @@ def run_embedding(
         endpoint_ids=endpoint_ids,
         consistency_check=config.consistency_check,
         runtime_parameters=runtime_parameters,
+        metadata={"source_file_record_num": source_sharding.get("file_record_num")},
     )
 
-    return write_embeddings_artifact(
+    def _iter_output_shards() -> Iterator[EmbeddingShard]:
+        for shard_index, chunk_shard in enumerate(
+            iter_chunk_shards(source_store, config.source_artifact_id),
+            start=1,
+        ):
+            shard_records: list[EmbeddingRecord] = []
+            processed_in_shard = 0
+            shard_batch_size = batch_size or max(1, len(chunk_shard.chunks))
+            shard_texts = [chunk.text for chunk in chunk_shard.chunks]
+            shard_batches = (
+                _batched_texts(shard_texts, shard_batch_size) if shard_texts else []
+            )
+            cursor = 0
+
+            for batch_index, batch_texts in enumerate(shard_batches, start=1):
+                vectors = client.embed_texts(batch_texts)
+                if len(vectors) != len(batch_texts):
+                    raise EmbeddingRunError(
+                        "Embedding client returned a different number of vectors"
+                    )
+
+                batch_chunks = chunk_shard.chunks[cursor : cursor + len(batch_texts)]
+                cursor += len(batch_texts)
+                for chunk, vector in zip(batch_chunks, vectors, strict=True):
+                    if len(vector) != config.embedding_dim:
+                        raise EmbeddingRunError(
+                            "Embedding client returned vectors with unexpected dimension"
+                        )
+                    record_metadata = dict(chunk.metadata)
+                    if chunk.title is not None:
+                        record_metadata["title"] = chunk.title
+                    record_metadata["chunk_index"] = chunk.chunk_index
+                    if chunk.start_offset is not None:
+                        record_metadata["start_offset"] = chunk.start_offset
+                    if chunk.end_offset is not None:
+                        record_metadata["end_offset"] = chunk.end_offset
+                    shard_records.append(
+                        EmbeddingRecord(
+                            chunk_id=chunk.chunk_id,
+                            doc_id=chunk.doc_id,
+                            vector=vector,
+                            metadata=record_metadata,
+                        )
+                    )
+
+                processed_in_shard += len(batch_texts)
+                report_progress(
+                    progress_reporter,
+                    stage="embedding",
+                    current=processed_in_shard,
+                    total=len(chunk_shard.chunks),
+                    message="Embedded shard batch",
+                    metadata={
+                        "kind": "batch",
+                        "shard_id": chunk_shard.shard_id,
+                        "batch_index": batch_index,
+                        "batch_size": len(batch_texts),
+                        "chunk_count": len(chunk_shard.chunks),
+                    },
+                )
+
+            report_progress(
+                progress_reporter,
+                stage="embedding",
+                current=shard_index,
+                total=shard_total,
+                message="Completed embedding shard",
+                metadata={
+                    "kind": "shard",
+                    "shard_id": chunk_shard.shard_id,
+                    "chunk_count": len(chunk_shard.chunks),
+                    "source_chunk_file": chunk_shard.path,
+                },
+            )
+            yield EmbeddingShard(
+                shard_id=chunk_shard.shard_id,
+                source_chunk_file=chunk_shard.path,
+                embedding_file=(
+                    f"embeddings/{chunk_shard.shard_id}.jsonl"
+                    if chunk_shard.path != "chunks.jsonl"
+                    else "embeddings.jsonl"
+                ),
+                source_chunk_count=len(chunk_shard.chunks),
+                embedding_count=len(shard_records),
+                first_chunk_id=shard_records[0].chunk_id if shard_records else None,
+                last_chunk_id=shard_records[-1].chunk_id if shard_records else None,
+                embeddings=shard_records,
+            )
+
+    manifest_metadata = _source_user_metadata(source_manifest.metadata)
+    manifest_metadata.update(config.metadata)
+
+    return write_embedding_shards_artifact(
         output_store,
         config.output_artifact_id,
-        embedded_corpus,
+        _iter_output_shards(),
         provenance=provenance,
         source_artifact_id=config.source_artifact_id,
         source_artifact_type="chunked_corpus",
         created_by=config.created_by,
         code_git_sha=config.code_git_sha,
-        metadata=config.metadata,
+        metadata=manifest_metadata,
     )
