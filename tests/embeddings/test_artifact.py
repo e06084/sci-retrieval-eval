@@ -13,6 +13,8 @@ from eval_platform.artifacts import (
 )
 from eval_platform.embeddings import (
     EMBEDDINGS_FILENAME,
+    VECTOR_DTYPE,
+    VECTOR_ENCODING,
     EmbeddedCorpus,
     EmbeddingArtifactError,
     EmbeddingProvenance,
@@ -56,7 +58,10 @@ def test_write_embeddings_artifact_writes_embeddings_jsonl(store: LocalArtifactS
     )
 
     payload = store.get_file("embeddings", "litsearch_embeddings", EMBEDDINGS_FILENAME)
-    assert payload.decode("utf-8")
+    text = payload.decode("utf-8")
+    assert text
+    assert "vector_b64" in text
+    assert '"vector":' not in text
     assert any(file.path == EMBEDDINGS_FILENAME for file in manifest.files)
 
 
@@ -80,7 +85,12 @@ def test_read_embeddings_artifact_round_trip(store: LocalArtifactStore) -> None:
         metadata={"stage": "embed"},
     )
     loaded = read_embeddings_artifact(store, "litsearch_embeddings")
-    assert loaded.embeddings == corpus.embeddings
+    assert len(loaded.embeddings) == len(corpus.embeddings)
+    for loaded_record, expected_record in zip(loaded.embeddings, corpus.embeddings, strict=True):
+        assert loaded_record.chunk_id == expected_record.chunk_id
+        assert loaded_record.doc_id == expected_record.doc_id
+        assert loaded_record.vector == pytest.approx(expected_record.vector)
+        assert loaded_record.metadata == expected_record.metadata
     assert loaded.metadata == {"source": "unit-test", "stage": "embed"}
 
 
@@ -95,6 +105,8 @@ def test_write_embeddings_artifact_records_system_metadata(store: LocalArtifactS
     assert manifest.metadata["unique_chunk_count"] == 3
     assert manifest.metadata["unique_doc_count"] == 2
     assert manifest.metadata["embedding_dim"] == 2
+    assert manifest.metadata["embedding_dtype"] == VECTOR_DTYPE
+    assert manifest.metadata["vector_encoding"] == VECTOR_ENCODING
     assert manifest.metadata["provenance"]["model_name"] == "text-embedding-3-large"
 
 
@@ -111,6 +123,8 @@ def test_write_embeddings_artifact_system_metadata_overrides_user_values(
             "unique_chunk_count": 888,
             "unique_doc_count": 777,
             "embedding_dim": 123,
+            "embedding_dtype": "wrong",
+            "vector_encoding": "wrong",
             "provenance": {"model_name": "wrong"},
             "stage": "embed",
         },
@@ -119,6 +133,8 @@ def test_write_embeddings_artifact_system_metadata_overrides_user_values(
     assert manifest.metadata["unique_chunk_count"] == 3
     assert manifest.metadata["unique_doc_count"] == 2
     assert manifest.metadata["embedding_dim"] == 2
+    assert manifest.metadata["embedding_dtype"] == VECTOR_DTYPE
+    assert manifest.metadata["vector_encoding"] == VECTOR_ENCODING
     assert manifest.metadata["provenance"]["model_name"] == "text-embedding-3-large"
     assert manifest.metadata["stage"] == "embed"
 
@@ -138,7 +154,10 @@ def test_write_embeddings_artifact_records_source_dependency(store: LocalArtifac
 
 def test_read_embeddings_artifact_requires_success_marker(store: LocalArtifactStore) -> None:
     artifact_id = "incomplete_embeddings"
-    payload = b'{"chunk_id":"chunk-1","doc_id":"doc-1","vector":[0.1,0.2]}\n'
+    payload = (
+        b'{"chunk_id":"chunk-1","doc_id":"doc-1","vector_b64":"zczMPc3MTD4=",'
+        b'"vector_encoding":"float32_le_base64","metadata":{}}\n'
+    )
     store.put_file("embeddings", artifact_id, EMBEDDINGS_FILENAME, payload)
     store.write_manifest(
         "embeddings",
@@ -152,6 +171,8 @@ def test_read_embeddings_artifact_requires_success_marker(store: LocalArtifactSt
                 "unique_chunk_count": 1,
                 "unique_doc_count": 1,
                 "embedding_dim": 2,
+                "embedding_dtype": VECTOR_DTYPE,
+                "vector_encoding": VECTOR_ENCODING,
                 "provenance": _sample_provenance().model_dump(mode="json"),
             },
             files=[ArtifactFile(path=EMBEDDINGS_FILENAME, size_bytes=len(payload))],
@@ -203,6 +224,8 @@ def test_read_embeddings_artifact_strips_system_metadata(store: LocalArtifactSto
             "unique_chunk_count": 999,
             "unique_doc_count": 999,
             "embedding_dim": 999,
+            "embedding_dtype": "wrong",
+            "vector_encoding": "wrong",
             "provenance": {"model_name": "wrong"},
             "stage": "embed",
         },

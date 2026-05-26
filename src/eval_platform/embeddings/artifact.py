@@ -12,7 +12,12 @@ from eval_platform.artifacts import (
     ArtifactManifest,
     ArtifactStore,
 )
-from eval_platform.embeddings.jsonl import dump_embeddings_jsonl, load_embeddings_jsonl
+from eval_platform.embeddings.jsonl import (
+    VECTOR_DTYPE,
+    VECTOR_ENCODING,
+    dump_embeddings_jsonl,
+    load_embeddings_jsonl,
+)
 from eval_platform.embeddings.schema import EmbeddedCorpus, EmbeddingProvenance
 
 EMBEDDINGS_ARTIFACT_TYPE = "embeddings"
@@ -22,6 +27,8 @@ _SYSTEM_METADATA_FIELDS = {
     "unique_chunk_count",
     "unique_doc_count",
     "embedding_dim",
+    "embedding_dtype",
+    "vector_encoding",
     "provenance",
 }
 
@@ -72,6 +79,8 @@ def write_embeddings_artifact(
             "unique_chunk_count": len({record.chunk_id for record in embedded_corpus.embeddings}),
             "unique_doc_count": len({record.doc_id for record in embedded_corpus.embeddings}),
             "embedding_dim": provenance.embedding_dim,
+            "embedding_dtype": VECTOR_DTYPE,
+            "vector_encoding": VECTOR_ENCODING,
             "provenance": provenance.model_dump(mode="json"),
         }
     )

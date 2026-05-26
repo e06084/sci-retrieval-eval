@@ -18,7 +18,12 @@ from eval_platform.embeddings.client import (
     http_embedding_client_from_env,
     run_embedding_consistency_check,
 )
-from eval_platform.embeddings.jsonl import dump_embeddings_jsonl, load_embeddings_jsonl
+from eval_platform.embeddings.jsonl import (
+    VECTOR_DTYPE,
+    VECTOR_ENCODING,
+    dump_embeddings_jsonl,
+    load_embeddings_jsonl,
+)
 from eval_platform.embeddings.runner import EmbeddingRunConfig, EmbeddingRunError, run_embedding
 from eval_platform.embeddings.schema import (
     EmbeddedCorpus,
@@ -44,6 +49,8 @@ __all__ = [
     "HTTPEmbeddingClient",
     "HTTPEmbeddingClientConfig",
     "MultiEndpointEmbeddingConfig",
+    "VECTOR_DTYPE",
+    "VECTOR_ENCODING",
     "dump_embeddings_jsonl",
     "http_embedding_client_from_env",
     "load_embeddings_jsonl",
