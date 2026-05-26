@@ -72,8 +72,8 @@
 - `report.md` 只写“做了什么、怎么验证、还有什么风险”。
 - 如果任务变更，先改 `TASK.md`，再继续开发。
 - 如果开发中发现新问题，不要直接扩做，先写入 `report.md`。
-- 开发 session 完成后必须提交 commit，并把 commit hash 写进 `report.md`。
-- 验收 session 通过 `git log`、`git diff` 和 `report.md` 同时核对结果。
+- 开发 session 完成后必须提交 commit，并把是否已提交和 commit subject 写进 `report.md`。
+- 验收 session 通过 `git log` 确认最终 commit hash，通过 `git diff` 和 `report.md` 核对结果。
 - 如果开发 session 的 commit 改动了“由验收 / 调度 session 维护并提交”的文件，默认视为越界。
 - 如果验收 / 调度 session 的 commit 改动了业务代码，默认需要在 `TASK.md` 或验收结论里说明原因。
 

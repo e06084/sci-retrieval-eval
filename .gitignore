@@ -9,4 +9,5 @@ dist/
 *.egg-info/
 .env
 .local_artifacts/
+TASK.md
 .DS_Store
