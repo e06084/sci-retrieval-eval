@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Raw dataset to normalized dataset ready for merge review.
+Platform config system ready for merge review.
 
 ## Implemented
 
@@ -18,8 +18,10 @@ Raw dataset to normalized dataset ready for merge review.
 - Multi-endpoint embedding config
 - Multi-endpoint embedding consistency pre-check helper
 - Embedding provenance endpoint and consistency metadata
-- Raw dataset artifact schema and import helpers, if merged
+- Raw dataset artifact schema and import helpers
 - Raw snapshot to normalized dataset API for IFIRNFCorpus
+- Unified platform config schema, loader, and redacted dump
+- Minimal `config-show` CLI
 
 ## In Progress
 
@@ -34,4 +36,4 @@ Raw dataset to normalized dataset ready for merge review.
 - Frontend dashboard
  
 ## Next Task
-Open and merge raw-to-normalized PR, then expand dataset-specific raw normalizers for the remaining raw assets.
+Open and merge platform config PR, then start config-backed corpus build runner wiring.

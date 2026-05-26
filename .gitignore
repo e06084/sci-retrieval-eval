@@ -9,5 +9,8 @@ dist/
 *.egg-info/
 .env
 .local_artifacts/
+config.yaml
+config.local.yaml
+*.secret.yaml
 TASK.md
 .DS_Store

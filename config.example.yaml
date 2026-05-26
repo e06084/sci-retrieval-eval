@@ -1,0 +1,64 @@
+s3:
+  endpoint: http://example-s3.internal
+  bucket: example-bucket
+  access_key_id: YOUR_ACCESS_KEY_ID
+  secret_access_key: YOUR_SECRET_ACCESS_KEY
+  prefix: sciverse_benchmark
+
+elasticsearch:
+  url: http://example-es.internal:9200
+  username: YOUR_ES_USERNAME
+  password: YOUR_ES_PASSWORD
+
+milvus:
+  address: tcp://example-milvus.internal:19530
+  username: YOUR_MILVUS_USERNAME
+  password: YOUR_MILVUS_PASSWORD
+  index_type: hnsw
+  db_name: example_db
+
+embedding:
+  model: BAAI/bge-m3
+  dim: 1024
+  batch_size: 64
+  max_concurrency: 8
+  per_endpoint_concurrency: 2
+  timeout_sec: 120
+  max_retries: 3
+  endpoints:
+    - url: http://example-embed-1.internal:3885/v1/embeddings
+      api_key: YOUR_EMBEDDING_API_KEY
+
+rerank:
+  model: BAAI/bge-reranker-v2-m3
+  timeout_sec: 60
+  max_retries: 2
+  endpoints:
+    - url: http://example-rerank-1.internal:3885/v1/rerank
+      api_key: YOUR_RERANK_API_KEY
+
+search_runtime:
+  go_api_url: http://127.0.0.1:8080
+  request_timeout_sec: 60
+  rewrite:
+    enabled: false
+    base_url: http://127.0.0.1:18081/v1
+    api_key: YOUR_REWRITE_API_KEY
+    model: fake-rewrite
+    timeout_sec: 60
+    temperature: 0
+    max_tokens: 1024
+
+raw_sources:
+  IFIRNFCorpus:
+    source_type: s3_prefix
+    uri: s3://example-bucket/sciverse_benchmark/raw/ifir_nfcorpus/
+
+chunking:
+  repo_path: /path/to/sciverse_clean
+  repo_remote: https://example.com/sciverse_clean.git
+  commit_sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+  chunker_name: sciverse_admin_ingest
+  chunk_params:
+    chunk_size: 600
+    chunk_overlap: 0

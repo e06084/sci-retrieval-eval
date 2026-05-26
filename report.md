@@ -6,8 +6,8 @@
 
 ## 1. 任务信息
 
-- 任务名：开发 raw_dataset -> normalized_dataset
-- 当前分支：`feat/raw-to-normalized`
+- 任务名：开发全局 config 系统
+- 当前分支：`feat/platform-config-system`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-26
 - 完成时间：2026-05-26
@@ -15,41 +15,47 @@
 ## 2. 本次改动
 
 - 改了什么：
-  - 新增 `src/eval_platform/datasets/raw_normalize.py`
-    - 定义 `RawToNormalizedConfig`
-    - 定义 `RawFileOpener` protocol
-    - 实现 `S3RawFileOpener`
-    - 实现 `normalize_raw_dataset_artifact(...)`
-    - 第一版支持 `IFIRNFCorpus`
-  - 扩展 `src/eval_platform/datasets/normalized.py`
-    - `write_normalized_dataset_artifact(...)` 新增可选 `dependencies`
-    - 保持旧调用方兼容
-  - 更新 `src/eval_platform/datasets/__init__.py`
-    - 导出 raw-to-normalized 公共接口
-  - 新增 `tests/datasets/test_raw_normalize.py`
-    - 覆盖 raw snapshot -> normalized artifact
-    - 覆盖 dependency
-    - 覆盖 query instruction metadata
-    - 覆盖流式 opener 约束
-  - 扩展 `tests/datasets/test_normalized_dataset.py`
-    - 验证 `write_normalized_dataset_artifact(...)` 传 dependency 时兼容
-  - 新增 ADR `docs/decisions/0012-raw-to-normalized-dataset.md`
+  - 新增 `src/eval_platform/config/`
+    - `schema.py`
+    - `load.py`
+    - `redaction.py`
+    - `__init__.py`
+  - 更新 `src/eval_platform/cli/main.py`
+    - 新增 `config-show`
+  - 新增 `tests/config/`
+    - `test_load.py`
+    - `test_redaction.py`
+  - 扩展 `tests/test_cli.py`
+    - 验证 redacted JSON 输出
+    - 验证 CLI override 优先级
+  - 新增 `config.example.yaml`
+  - 更新 `.gitignore`
+    - 忽略 `config.yaml`
+    - 忽略 `config.local.yaml`
+    - 忽略 `*.secret.yaml`
+  - 新增 ADR `docs/decisions/0013-platform-config-system.md`
 - 为什么这样改：
-  - `raw_dataset` 已经是可信输入快照，但 `normalized_dataset` 还没有显式绑定 raw 上游身份。
-  - 本轮把 `normalized_dataset` 明确变成 `raw_dataset` 的标准化产物，并保证 raw source 的打开方式可注入、可测试。
+  - 配置来源现在分散在 YAML、环境变量 helper 和后续 runner 需求之间，缺少统一入口。
+  - 用户明确要求配置优先级可复现，并且不支持环境变量隐式覆盖。
 - 没改什么：
-  - 没有实现 runner / orchestration
-  - 没有实现 chunk / embedding / ES / Milvus / retrieval / metrics
-  - 没有访问真实外部服务
+  - 没有实现 corpus build runner
+  - 没有改 raw-to-normalized / chunk / embedding 的业务逻辑
+  - 没有接真实 S3 / ES / Milvus / embedding API
 
 ## 3. 涉及文件
 
-- `src/eval_platform/datasets/__init__.py`
-- `src/eval_platform/datasets/normalized.py`
-- `src/eval_platform/datasets/raw_normalize.py`
-- `tests/datasets/test_normalized_dataset.py`
-- `tests/datasets/test_raw_normalize.py`
-- `docs/decisions/0012-raw-to-normalized-dataset.md`
+- `.gitignore`
+- `config.example.yaml`
+- `src/eval_platform/config/__init__.py`
+- `src/eval_platform/config/schema.py`
+- `src/eval_platform/config/load.py`
+- `src/eval_platform/config/redaction.py`
+- `src/eval_platform/cli/main.py`
+- `tests/config/__init__.py`
+- `tests/config/test_load.py`
+- `tests/config/test_redaction.py`
+- `tests/test_cli.py`
+- `docs/decisions/0013-platform-config-system.md`
 - `docs/ai/current_status.md`
 - `report.md`
 
@@ -60,94 +66,107 @@
 
 ## 4. 实现说明
 
-### 4.1 raw-to-normalized API
+### 4.1 配置优先级如何实现
 
-新增入口：
+`load_platform_config(...)` 固定实现：
 
-```python
-normalize_raw_dataset_artifact(
-    source_store,
-    output_store,
-    RawToNormalizedConfig(...),
-    opener=...,
-)
+```text
+代码默认值 < config.yaml < CLI 参数
 ```
 
-含义：
+实现步骤：
 
-- 输入：`raw_dataset` artifact
-- 输出：`normalized_dataset` artifact
-- `source_store` 与 `output_store` 可以不同
-- `opener` 负责按 `RawDatasetFile.uri` 打开原始文件流
-- 当前内置生产 opener：
-  - `S3RawFileOpener`
-  - 默认用 boto3 client 打开 `s3://bucket/key`
-  - 测试使用 fake S3 client，不访问真实 S3
+1. 先构造 `PlatformConfig()` 默认值。
+2. 如果提供 `config_path`，加载 YAML 并做 deep merge。
+3. 如果提供 `cli_overrides`，再做一次 deep merge。
+4. 最终用 `PlatformConfig.model_validate(...)` 输出强类型对象。
 
-### 4.2 IFIRNFCorpus 字段映射
+### 4.2 为什么不支持环境变量覆盖
 
-第一版只支持：
+本轮 loader 完全不读取 `os.environ`：
 
-- `dataset_name == "IFIRNFCorpus"`
-- 或 `normalizer_name == "ifir_nfcorpus_raw_jsonl_tsv_v1"`
+1. 不做环境变量 override
+2. 不做 `${VAR}` expansion
+3. 不把环境变量作为优先级层
 
-映射规则：
+原因：
 
-- `corpus.jsonl`
-  - `_id -> CorpusRecord.doc_id`
-  - `title -> CorpusRecord.title`
-  - `text -> CorpusRecord.text`
-- `queries.jsonl`
-  - `_id -> QueryRecord.query_id`
-  - `text -> QueryRecord.text`
-- `instructions.jsonl`
-  - `query-id -> QueryRecord.metadata["instruction"]`
-- `qrels/test.tsv`
-  - `query-id -> QrelRecord.query_id`
-  - `corpus-id -> QrelRecord.doc_id`
-  - `score -> QrelRecord.relevance`
+1. 用户明确要求不要有环境变量隐式覆盖。
+2. 只有 config 文件和 CLI 参数，实验配置才能被稳定还原。
+3. 私密配置如果需要注入，也应通过本地 YAML 文件路径显式传入。
 
-### 4.3 dependency 写入方式
+### 4.3 schema 覆盖的顶层配置块
 
-`write_normalized_dataset_artifact(...)` 新增：
+第一版 `PlatformConfig` 覆盖：
 
-```python
-dependencies: list[ArtifactDependency] | None = None
+1. `s3`
+2. `elasticsearch`
+3. `milvus`
+4. `embedding`
+5. `rerank`
+6. `search_runtime`
+7. `raw_sources`
+8. `chunking`
+
+其中：
+
+1. `PlatformConfig()` 可直接构造
+2. 外部依赖字段大多允许为 `None`
+3. `raw_sources` 可表达 `IFIRNFCorpus -> s3://.../raw/ifir_nfcorpus/`
+
+### 4.4 deep merge 规则
+
+`deep_merge_config(...)` 规则：
+
+1. dict：递归合并
+2. list：整体替换
+3. scalar：覆盖
+4. `None`：显式覆盖为 `None`
+
+这保证：
+
+1. YAML 可以覆盖默认值
+2. CLI 可以覆盖 YAML
+3. nested dict 可局部覆盖
+4. `embedding.endpoints` 这种 list 不会做逐项拼接
+
+### 4.5 redaction 规则
+
+`dump_redacted_config(...)` 会遮蔽字段名包含以下 token 的值：
+
+1. `password`
+2. `secret`
+3. `access_key`
+4. `api_key`
+5. `token`
+
+遮蔽值统一为：
+
+```text
+"***"
 ```
 
-raw-to-normalized 调用时会写入：
+支持 nested dict / list，包括：
 
-- `artifact_type = "raw_dataset"`
-- `artifact_id = config.source_artifact_id`
+1. `embedding.endpoints[].api_key`
+2. `search_runtime.rewrite.api_key`
+3. `s3.secret_access_key`
 
-同时 normalized manifest metadata 至少写入：
+### 4.6 CLI 是否接入
 
-- `source = "raw_dataset"`
-- `task_name`
-- `split`
-- `normalizer_name`
-- `raw_dataset_artifact_id`
-- `raw_dataset_fingerprint`
-- `raw_source_uri`
-- `normalized_schema_version`
+本轮已接入最小 CLI：
 
-### 4.4 streaming 如何保证
+```bash
+evalctl config-show --config path/to/config.yaml
+```
 
-本轮没有通过 `mteb.load_data()` 走内存对象。
+行为：
 
-`IFIRNFCorpus` 的 raw 文件读取方式：
-
-- JSONL：
-  - 通过 `for raw_line in stream` 逐行解析
-  - 不做 `body.read().decode()`
-- TSV：
-  - 通过 `csv.DictReader(...)` 读取
-  - 测试样本里规模很小
-
-测试中使用 `FakeRawFileOpener` + `RecordingBinaryStream` 验证：
-
-- corpus JSONL 确实通过迭代逐行读取
-- 不会对 corpus stream 调用 `read(-1)` 一次性整文件读取
+1. 默认输出 redacted JSON
+2. 支持示例 override：
+   - `--s3-prefix`
+   - `--embedding-batch-size`
+3. 不读取环境变量
 
 ## 5. 自检结果
 
@@ -156,7 +175,7 @@ raw-to-normalized 调用时会写入：
 ```bash
 git status --short
 git diff --name-only origin/main...HEAD
-pytest tests/datasets tests/artifacts
+pytest tests/config tests/test_cli.py
 ruff check .
 mypy .
 pytest
@@ -165,37 +184,33 @@ pytest
 ### 5.2 输出摘要
 
 - `git status --short`：
-  - 开发完成前仅包含 `src/eval_platform/datasets/`、`tests/datasets/`、ADR、`current_status.md` 与 `report.md` 改动
+  - 开发完成前只包含允许范围内文件改动
 - `git diff --name-only origin/main...HEAD`：
-  - 只涉及允许范围内文件
-  - 不包含 `chunking/`、`embeddings/`、`indexes/`、`retrieval/`、`metrics/`
-- `pytest tests/datasets tests/artifacts`：
-  - 通过，`93 passed`
+  - 不包含 `chunking/`、`datasets/`、`embeddings/`、`indexes/`、`retrieval/`、`metrics/`
+- `pytest tests/config tests/test_cli.py`：
+  - 通过，`13 passed`
 - `ruff check .`：
   - 通过
 - `mypy .`：
-  - 通过，`Success: no issues found in 84 source files`
+  - 通过，`Success: no issues found in 91 source files`
 - `pytest`：
-  - 通过，`340 passed`
+  - 通过，`354 passed`
 
 ### 5.3 提交信息
 
 - 是否已提交：`yes`
-- commit subjects：
-  - `Add raw to normalized dataset adapter`
-  - `Add S3 raw file opener`
+- commit subject：`Harden platform config validation`
 - 验收者确认的最终 commit：
 
 ## 6. 风险与未决项
 
 - 已知风险：
-  - 第一版只覆盖 `IFIRNFCorpus`，其余 raw asset 仍需补 dataset-specific raw normalizer
-  - 当前 writer 仍要求先构造内存中的 `NormalizedDataset`；在支持 `ifir_scifact` 这类更大 corpus 前，还需要 streaming normalized writer 或分批 writer
+  - 旧的 `http_embedding_client_from_env(...)` 仍然存在于 embeddings 模块中；本轮没有删除，只是不把它接入新 config 系统
 - 未覆盖场景：
-  - 还没有批量 runner / orchestration
+  - 还没有把新 config 系统接到 corpus build runner / raw opener / embedding runner 的真实业务入口
 - 需要验收者重点检查的点：
-  - `raw_source_uri` 的定义是否足够稳定
-  - `normalizer_name` 的命名是否满足后续扩展
+  - `config.example.yaml` 的字段覆盖范围是否足够支撑下一阶段
+  - CLI 是否只做了最小配置展示，而没有越界做业务 runner
 
 ## 7. 交付结论
 
