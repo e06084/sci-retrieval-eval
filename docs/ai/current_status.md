@@ -2,48 +2,31 @@
 
 ## Current Phase
 
-MTEB per-dataset normalizer registry completed locally and pending PR / merge review.
+Embedding runner to S3 PR ready for merge review.
 
 ## Implemented
 
-- Project rules (`AGENTS.md`)
-- Architecture and AI collaboration docs (`docs/`)
-- Local artifact store (`LocalArtifactStore`)
-- S3 artifact store (`S3ArtifactStore`)
-- Normalized dataset schema and artifact read/write
-- MTEB dataset adapter
-- MTEB dataset layout compatibility fix
-- MTEB per-dataset normalizer registry for:
-  - `LitSearchRetrieval`
-  - `SciFact`
-  - `IFIRScifact`
-  - `IFIRNFCorpus`
-  - `NFCorpus`
-- Chunked corpus schema with external chunker provenance metadata
-- Chunk JSONL helpers (`dump_chunks_jsonl`, `load_chunks_jsonl`)
-- Chunked corpus source artifact dependency in manifest
-- Chunking runner with git clean-state inspection
-- Version-pinned external chunker adapter
-- Sciverse admin-ingest thin adapter with version-pinned repo checks
+- Local/S3 artifact store
+- Normalized dataset schema
+- MTEB per-dataset normalizer registry
+- Chunked corpus schema
+- Chunking runner
+- Embedding schema and artifact read/write
+- Embedding runner with injectable client and separate source/output stores
 
 ## In Progress
 
-- PR / merge review for `feat/mteb-normalizer-registry`
-- Follow-up integration work on embedding schema
+- PR / merge review for `feat/embedding-runner-s3`
 
 ## Not Implemented
 
-- Embedding pipeline
-- ES/Milvus index builder
+- Real embedding API client
+- Milvus index builder
+- ES index builder
 - Retrieval pipeline
 - Metrics and reports
 - Frontend dashboard
 
-## Current Risks
-
-- The MTEB target set is stable now, but any future new retrieval task should add an explicit normalizer instead of implicit fallback logic.
-- `LitSearchRetrieval` currently requires dataset-specific cleanup for empty corpus rows; future upstream dataset revisions may change the cleanup counts.
-
 ## Next Task
 
-Open and merge the MTEB normalizer registry PR, then start `feat/embedding-schema`.
+Open and merge embedding runner S3 PR, then start `feat/embedding-api-client`.
