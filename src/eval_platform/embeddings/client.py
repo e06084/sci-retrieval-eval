@@ -125,7 +125,7 @@ class HTTPEmbeddingClient:
         self._transport = transport or _default_transport
 
     def _build_payload(self, texts: Sequence[str]) -> bytes:
-        payload: dict[str, Any] = {"texts": list(texts)}
+        payload: dict[str, Any] = {"input": list(texts)}
         if self._config.model_name is not None:
             payload["model"] = self._config.model_name
         return json.dumps(payload).encode("utf-8")

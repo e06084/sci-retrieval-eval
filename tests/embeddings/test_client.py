@@ -83,6 +83,7 @@ def test_http_embedding_client_supports_response_format_a() -> None:
     )
     vectors = client.embed_texts(["a", "b"])
     assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+    assert transport.calls[0]["payload"]["input"] == ["a", "b"]
 
 
 def test_http_embedding_client_supports_response_format_b() -> None:
@@ -128,6 +129,7 @@ def test_http_embedding_client_includes_model_when_configured() -> None:
     )
     client.embed_texts(["a"])
     assert transport.calls[0]["payload"]["model"] == "text-embedding-3-large"
+    assert transport.calls[0]["payload"]["input"] == ["a"]
 
 
 def test_http_embedding_client_omits_model_when_not_configured() -> None:
@@ -138,6 +140,7 @@ def test_http_embedding_client_omits_model_when_not_configured() -> None:
     )
     client.embed_texts(["a"])
     assert "model" not in transport.calls[0]["payload"]
+    assert transport.calls[0]["payload"]["input"] == ["a"]
 
 
 def test_http_embedding_client_raises_for_http_error_status() -> None:
