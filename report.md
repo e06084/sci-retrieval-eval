@@ -1,57 +1,77 @@
-# 进度报告
+# 开发报告
 
-## 当前阶段
+本文件由开发 session 维护。
 
-Embedding API client ready for merge review.
+验收 session 默认只检查这里，不追聊天记录。
 
-## 本次开发
+## 1. 任务信息
 
-- 在现有 `EmbeddingClient` / `FakeEmbeddingClient` 基础上新增：
-  - `EmbeddingClientError`
-  - `HTTPEmbeddingClientConfig`
-  - `HTTPEmbeddingClient`
-  - `http_embedding_client_from_env(...)`
-- 保持 runner 语义不变：
-  - client 只负责文本到向量
-  - runner 继续负责 artifact 读写
+- 任务名：
+- 当前分支：
+- 对应指令文件：`TASK.md`
+- 开始时间：
+- 完成时间：
 
-## HTTP client 语义
+## 2. 本次改动
 
-- 默认使用标准库 `urllib.request`
-- 支持 batching
-- 支持两种响应格式：
-  - `{"embeddings": [[...], [...]]}`
-  - `{"data": [{"embedding": [...]}, {"embedding": [...]}]}`
-- API key 只从环境变量读取
-- 单元测试全部使用 fake transport，不访问网络
+- 改了什么：
+- 为什么这样改：
+- 没改什么：
 
-## 测试
+## 3. 涉及文件
 
-已覆盖：
+- `path/to/file`
+- `path/to/test_file`
 
-- config 校验
-- headers 默认值不共享
-- response format A
-- response format B
-- batching 调用次数
-- model 字段有无
-- HTTP 非 2xx
-- 非法 JSON
-- 向量数量不匹配
-- 空 vector
-- NaN / inf / 非数字
-- 从环境变量构造 client
+### 3.1 范围自检
 
-## 范围约束
+- 是否改动了流程控制文档：`yes / no`
+- 如果是，改动理由：
 
-本 PR：
+## 4. 实现说明
 
-- 不访问真实 embedding API
-- 不实现 Milvus
-- 不实现 ES
-- 不实现 retrieval / metrics / frontend
+### 4.1 关键决策
 
-## 建议后续方向
+- 决策 1：
+- 决策 2：
 
-- 合并 `feat/embedding-api-client`
-- 然后开始 `feat/milvus-index-schema`
+### 4.2 关键行为
+
+- 行为 1：
+- 行为 2：
+
+## 5. 自检结果
+
+### 5.1 必跑命令
+
+```bash
+git status --short
+git diff --name-only origin/main...HEAD
+pytest
+ruff check .
+```
+
+### 5.2 输出摘要
+
+- `git status --short`：
+- `git diff --name-only origin/main...HEAD`：
+- `pytest`：
+- `ruff check .`：
+- `mypy .`：
+
+### 5.3 提交信息
+
+- 最新 commit：
+- 相关 commit 列表：
+
+## 6. 风险与未决项
+
+- 已知风险：
+- 未覆盖场景：
+- 需要验收者重点检查的点：
+
+## 7. 交付结论
+
+- 是否建议验收：`yes / no`
+- 是否建议合并：`yes / no`
+- 如果不能合并，卡点是什么：

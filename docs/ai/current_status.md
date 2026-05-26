@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Embedding API client ready for merge review.
+Post-embedding artifact baseline; preparing embedding consistency hardening.
 
 ## Implemented
 
@@ -14,10 +14,11 @@ Embedding API client ready for merge review.
 - Embedding schema and artifact read/write
 - Embedding runner with injectable client and separate source/output stores
 - HTTP embedding client
+- HTTP embedding request payload fix merged on `main`
 
 ## In Progress
 
-- PR / merge review for `feat/embedding-runner-s3`
+- Embedding consistency hardening planning
 
 ## Not Implemented
 
@@ -29,4 +30,4 @@ Embedding API client ready for merge review.
 - Frontend dashboard
  
 ## Next Task
-Open and merge embedding API client PR, then start `feat/milvus-index-schema`.
+Harden embedding stage, especially multi-endpoint consistency checks, before starting ES / Milvus ingest artifacts.
