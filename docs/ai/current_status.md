@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Corpus build runner v1 in progress.
+Five-dataset raw normalizer expansion ready for merge review.
 
 ## Implemented
 
@@ -26,19 +26,20 @@ Corpus build runner v1 in progress.
 - Elasticsearch ingest runner from sharded `chunked_corpus` to auditable `elasticsearch_index` artifact
 - Milvus ingest runner from aligned sharded `chunked_corpus` + `embeddings` to auditable `milvus_collection` artifact
 - Corpus build runner v1 for IFIRNFCorpus with run-level `corpus_build` artifact
+- Raw-to-normalized normalizer registry for IFIRNFCorpus, IFIRScifact, NFCorpus, SciFact, and LitSearchRetrieval
+- Corpus build runner dataset allowlist backed by the raw normalizer registry
 
 ## In Progress
 
-- Corpus build runner PR validation
+- Five-dataset raw normalizer PR validation
 
 ## Not Implemented
 
 - Retrieval pipeline
 - Metrics and reports
 - Frontend dashboard
-- Multi-dataset raw normalizer expansion
 - Corpus build CLI / scheduler
 
 ## Next Task
 
-Open and merge corpus build runner PR, then start retrieval pipeline design.
+Open and merge five-dataset raw normalizer PR, then run a controlled five-dataset raw-source smoke before retrieval pipeline design.

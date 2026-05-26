@@ -28,6 +28,7 @@ from eval_platform.datasets import (
     import_raw_dataset_from_s3_prefix,
     normalize_raw_dataset_artifact,
 )
+from eval_platform.datasets.raw_normalize import SUPPORTED_RAW_NORMALIZER_DATASET_NAMES
 from eval_platform.embeddings import (
     EMBEDDINGS_ARTIFACT_TYPE,
     EmbeddingClient,
@@ -46,7 +47,6 @@ from eval_platform.indexes import (
 )
 
 CORPUS_BUILD_ARTIFACT_TYPE = "corpus_build"
-_SUPPORTED_DATASET_NAME = "IFIRNFCorpus"
 _SENSITIVE_METADATA_KEY_PARTS = (
     "access_key",
     "api_key",
@@ -107,7 +107,7 @@ class CorpusBuildConfig(BaseModel):
     """Configuration for a corpus build run."""
 
     run_id: str
-    dataset_name: str = _SUPPORTED_DATASET_NAME
+    dataset_name: str = "IFIRNFCorpus"
     raw_source: RawSourceSpec
     artifact_ids: CorpusBuildArtifactIds | None = None
     enable_elasticsearch: bool = True
@@ -123,9 +123,10 @@ class CorpusBuildConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_dataset_name(self) -> CorpusBuildConfig:
-        if self.dataset_name != _SUPPORTED_DATASET_NAME:
+        if self.dataset_name not in SUPPORTED_RAW_NORMALIZER_DATASET_NAMES:
             raise ValueError(
-                f"corpus build v1 supports only dataset_name={_SUPPORTED_DATASET_NAME!r}"
+                "corpus build v1 supports only registered raw normalizer datasets: "
+                f"{sorted(SUPPORTED_RAW_NORMALIZER_DATASET_NAMES)}"
             )
         return self
 

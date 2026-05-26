@@ -206,6 +206,7 @@ def _configs(
     raw_dir: Path,
     chunker_repo: Path,
     run_id: str = "test_ifir",
+    dataset_name: str = "IFIRNFCorpus",
     enable_elasticsearch: bool = True,
     enable_milvus: bool = True,
 ) -> tuple[
@@ -223,6 +224,7 @@ def _configs(
     )
     build_config = CorpusBuildConfig(
         run_id=run_id,
+        dataset_name=dataset_name,
         raw_source=RawSourceSpec(
             source_type="local_dir",
             uri=str(raw_dir),
@@ -235,7 +237,7 @@ def _configs(
     raw_to_normalized_config = RawToNormalizedConfig(
         source_artifact_id=ids.raw_dataset,
         output_artifact_id=ids.normalized_dataset,
-        dataset_name="IFIRNFCorpus",
+        dataset_name=dataset_name,
         created_by="test",
     )
     chunking_config = ChunkingRunConfig(
@@ -293,6 +295,7 @@ def _run_build(
     *,
     raw_dir: Path,
     chunker_repo: Path,
+    dataset_name: str = "IFIRNFCorpus",
     enable_elasticsearch: bool = True,
     enable_milvus: bool = True,
     embedding_client: EmbeddingClient | None = None,
@@ -310,6 +313,7 @@ def _run_build(
     ) = _configs(
         raw_dir=raw_dir,
         chunker_repo=chunker_repo,
+        dataset_name=dataset_name,
         enable_elasticsearch=enable_elasticsearch,
         enable_milvus=enable_milvus,
     )
@@ -350,6 +354,32 @@ def test_default_corpus_build_artifact_ids_respect_disabled_stages() -> None:
 
     assert ids.elasticsearch_index is None
     assert ids.milvus_collection is None
+
+
+@pytest.mark.parametrize(
+    "dataset_name",
+    ["IFIRNFCorpus", "IFIRScifact", "NFCorpus", "SciFact", "LitSearchRetrieval"],
+)
+def test_corpus_build_config_accepts_registered_raw_normalizer_datasets(
+    raw_dir: Path,
+    dataset_name: str,
+) -> None:
+    config = CorpusBuildConfig(
+        run_id="test",
+        dataset_name=dataset_name,
+        raw_source=RawSourceSpec(source_type="local_dir", uri=str(raw_dir)),
+    )
+
+    assert config.dataset_name == dataset_name
+
+
+def test_corpus_build_config_rejects_unsupported_dataset(raw_dir: Path) -> None:
+    with pytest.raises(ValueError, match="registered raw normalizer datasets"):
+        CorpusBuildConfig(
+            run_id="test",
+            dataset_name="UnknownDataset",
+            raw_source=RawSourceSpec(source_type="local_dir", uri=str(raw_dir)),
+        )
 
 
 def test_run_corpus_build_happy_path_calls_stages_in_order(
@@ -449,6 +479,29 @@ def test_run_corpus_build_can_disable_milvus(
         dependency.artifact_type for dependency in manifest.dependencies
     ]
     assert manifest.metadata["enabled_stages"]["milvus"] is False
+
+
+def test_run_corpus_build_non_ifir_dataset_not_blocked_by_runner(
+    store: LocalArtifactStore,
+    raw_dir: Path,
+    chunker_repo: Path,
+) -> None:
+    manifest = _run_build(
+        store,
+        raw_dir=raw_dir,
+        chunker_repo=chunker_repo,
+        dataset_name="SciFact",
+        enable_elasticsearch=False,
+        enable_milvus=False,
+    )
+
+    assert manifest.metadata["dataset_name"] == "SciFact"
+    assert [dependency.artifact_type for dependency in manifest.dependencies] == [
+        "raw_dataset",
+        "normalized_dataset",
+        "chunked_corpus",
+        "embeddings",
+    ]
 
 
 def test_run_corpus_build_rejects_stage_config_artifact_id_mismatch(

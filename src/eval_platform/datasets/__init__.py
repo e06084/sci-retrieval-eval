@@ -24,8 +24,11 @@ from eval_platform.datasets.raw_import import (
     import_raw_dataset_from_s3_prefix,
 )
 from eval_platform.datasets.raw_normalize import (
+    RAW_NORMALIZER_SPECS,
+    SUPPORTED_RAW_NORMALIZER_DATASET_NAMES,
     RawFileOpener,
     RawNormalizeError,
+    RawNormalizerSpec,
     RawToNormalizedConfig,
     S3RawFileOpener,
     normalize_raw_dataset_artifact,
@@ -43,6 +46,8 @@ __all__ = [
     "QRELS_FILENAME",
     "QUERIES_FILENAME",
     "RAW_DATASET_ARTIFACT_TYPE",
+    "RAW_NORMALIZER_SPECS",
+    "SUPPORTED_RAW_NORMALIZER_DATASET_NAMES",
     "CorpusRecord",
     "NormalizedDataset",
     "QrelRecord",
@@ -53,6 +58,7 @@ __all__ = [
     "RawDatasetImportError",
     "RawDatasetSnapshot",
     "RawNormalizeError",
+    "RawNormalizerSpec",
     "RawToNormalizedConfig",
     "S3RawFileOpener",
     "build_content_fingerprint_sha256",
