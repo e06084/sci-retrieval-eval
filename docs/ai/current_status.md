@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Elasticsearch ingest artifact in progress.
+Milvus ingest artifact in progress.
 
 ## Implemented
 
@@ -24,19 +24,19 @@ Elasticsearch ingest artifact in progress.
 - Stream-oriented embedding shard writer without full-corpus accumulation
 - Reusable progress reporter for raw-to-normalized / chunking / embedding
 - Elasticsearch ingest runner from sharded `chunked_corpus` to auditable `elasticsearch_index` artifact
+- Milvus ingest runner from aligned sharded `chunked_corpus` + `embeddings` to auditable `milvus_collection` artifact
 
 ## In Progress
 
-- Elasticsearch ingest PR validation
+- Milvus ingest PR validation; full IFIRNFCorpus ES + Milvus real ingest smoke passed
 
 ## Not Implemented
 
 - Corpus build runner
-- Milvus ingest
 - Retrieval pipeline
 - Metrics and reports
 - Frontend dashboard
 
 ## Next Task
 
-Open and merge Elasticsearch ingest PR, then start Milvus ingest on top of shard zip join.
+Open and merge Milvus ingest PR, then start corpus build runner orchestration.

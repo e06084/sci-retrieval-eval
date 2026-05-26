@@ -21,6 +21,9 @@ dev = [
 mteb = [
     "mteb>=2.0.0",
 ]
+milvus = [
+    "pymilvus>=2.4",
+]
 
 [project.scripts]
 evalctl = "eval_platform.cli.main:app"
