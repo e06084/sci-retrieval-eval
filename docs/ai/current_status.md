@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Embedding runner to S3 PR ready for merge review.
+Embedding API client ready for merge review.
 
 ## Implemented
 
@@ -13,6 +13,7 @@ Embedding runner to S3 PR ready for merge review.
 - Chunking runner
 - Embedding schema and artifact read/write
 - Embedding runner with injectable client and separate source/output stores
+- HTTP embedding client
 
 ## In Progress
 
@@ -26,7 +27,6 @@ Embedding runner to S3 PR ready for merge review.
 - Retrieval pipeline
 - Metrics and reports
 - Frontend dashboard
-
+ 
 ## Next Task
-
-Open and merge embedding runner S3 PR, then start `feat/embedding-api-client`.
+Open and merge embedding API client PR, then start `feat/milvus-index-schema`.
