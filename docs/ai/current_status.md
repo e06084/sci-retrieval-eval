@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Retrieval run artifact ready for merge review.
+Metrics run artifact ready for merge review.
 
 ## Implemented
 
@@ -29,14 +29,14 @@ Retrieval run artifact ready for merge review.
 - Raw-to-normalized normalizer registry for IFIRNFCorpus, IFIRScifact, NFCorpus, SciFact, and LitSearchRetrieval
 - Corpus build runner dataset allowlist backed by the raw normalizer registry
 - Retrieval hit/result schemas, RRF fusion, retrieval client protocols, retrieval runner, replay trace, replay execution mode, and `retrieval_run` artifact
+- Metrics run artifact, chunk-to-doc projection, MTEB-style IR metrics, and metrics runner
 
 ## In Progress
 
-- Retrieval run artifact PR validation
+- Metrics run artifact PR validation
 
 ## Not Implemented
 
-- Metrics and reports
 - Frontend dashboard
 - Corpus build CLI / scheduler
 - Real Elasticsearch retrieval adapter
@@ -45,4 +45,4 @@ Retrieval run artifact ready for merge review.
 
 ## Next Task
 
-Open and merge retrieval run artifact PR, then start `metrics_run` artifact design.
+Open and merge metrics run artifact PR, then start benchmark runner design.
