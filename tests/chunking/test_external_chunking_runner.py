@@ -83,6 +83,11 @@ def _module_name() -> str:
     return f"fake_versioned_chunker_{uuid.uuid4().hex}"
 
 
+def _different_sha(commit_sha: str) -> str:
+    replacement = "0" if commit_sha[-1] != "0" else "1"
+    return f"{commit_sha[:-1]}{replacement}"
+
+
 @pytest.fixture
 def store(tmp_path: Path) -> LocalArtifactStore:
     return LocalArtifactStore(tmp_path / "artifacts")
@@ -229,7 +234,7 @@ def test_run_version_pinned_external_chunking_fails_for_commit_mismatch(
             repo_spec=ExternalChunkerRepoSpec(
                 repo_path=str(repo_path),
                 expected_remote_url=remote_url,
-                expected_commit_sha=f"{commit_sha[:-1]}0",
+                expected_commit_sha=_different_sha(commit_sha),
             ),
             adapter_config=PythonCallableChunkerConfig(
                 repo_path=str(repo_path),

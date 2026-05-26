@@ -6,8 +6,8 @@
 
 ## 1. 任务信息
 
-- 任务名：修复 embedding 一致性门禁
-- 当前分支：`feat/embedding-consistency-hardening`
+- 任务名：新增 raw_dataset artifact
+- 当前分支：`feat/raw-dataset-artifact`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-26
 - 完成时间：2026-05-26
@@ -15,32 +15,35 @@
 ## 2. 本次改动
 
 - 改了什么：
-  - 给 `run_embedding(...)` 增加了一致性门禁：
-    - 多 endpoint 但没有 `consistency_check` 时拒绝写 artifact
-    - `consistency_check.passed is False` 时拒绝写 artifact
-  - 给 `EmbeddingConsistencyCheckResult` 增加语义自洽校验：
-    - `passed=True` 时不允许 `failure_reason`
-    - `passed=False` 时必须提供非空 `failure_reason`
-  - 把 `run_embedding_consistency_check(...)` 中 endpoint client 的异常、空向量、非数字、非有限值都收敛为结构化失败结果，而不是直接向外抛异常。
-  - 为以上行为补了 schema / client / runner 测试。
+  - 新增 `src/eval_platform/datasets/raw.py`，定义 `raw_dataset` artifact 的 schema、manifest 字段和读写逻辑。
+  - 新增 `src/eval_platform/datasets/raw_import.py`，支持：
+    - 从本地目录导入 raw 文件元数据快照
+    - 从既有 S3 prefix 导入 raw 文件元数据快照
+  - 更新 `src/eval_platform/datasets/__init__.py`，导出 `raw_dataset` 相关公共接口。
+  - 根据验收反馈，把第一版实现收紧为 snapshot-only：
+    - 不再复制 raw 文件内容到 artifact store
+    - artifact 内只写 `_MANIFEST.json` 和 `_SUCCESS`
+  - 新增 `tests/datasets/test_raw_dataset.py`，覆盖 snapshot-only、本地目录导入、fake S3 source 导入、fake S3 output 和流式 body 场景。
+  - 新增 ADR `docs/decisions/0011-raw-dataset-artifact.md`。
+  - 修复 `tests/chunking/test_external_chunking_runner.py` 中不稳定的错误 commit SHA 构造，保证 mismatch 测试一定使用不同 SHA。
 - 为什么这样改：
-  - 上一轮实现虽然补了 endpoint 配置和 consistency check schema，但还没有真正把 consistency check 变成 artifact 写入前的硬门禁。
-  - 这会留下“预检查失败但仍能写出成功 artifact”的漏洞，不符合本项目的一致性目标。
+  - 当前 `normalized_dataset` 直接从内存对象开始，缺少“原始输入先落盘”的可审计层。
+  - `raw_dataset` artifact 先固定原始文件身份，后续才能稳定建立 `raw_dataset -> normalized_dataset` 依赖。
+  - 验收反馈指出之前的 `dict[str, bytes]` 聚合方案在大文件场景下仍会把 raw 内容积到内存里，不满足本任务目标，所以改成 manifest snapshot 设计。
 - 没改什么：
-  - 没有实现 ES / Milvus builder。
-  - 没有实现 retrieval pipeline。
-  - 没有实现 metrics / report 生成逻辑。
-  - 没有访问真实外部服务。
+  - 没有实现 `raw_dataset -> normalized_dataset` 自动转换。
+  - 没有实现 chunk / embedding / ES / Milvus / retrieval / metrics。
+  - 没有访问真实外部服务或真实 S3。
 
 ## 3. 涉及文件
 
-- `src/eval_platform/embeddings/__init__.py`
-- `src/eval_platform/embeddings/client.py`
-- `src/eval_platform/embeddings/runner.py`
-- `src/eval_platform/embeddings/schema.py`
-- `tests/embeddings/test_client.py`
-- `tests/embeddings/test_runner.py`
-- `tests/embeddings/test_schema.py`
+- `src/eval_platform/datasets/__init__.py`
+- `src/eval_platform/datasets/raw.py`
+- `src/eval_platform/datasets/raw_import.py`
+- `tests/datasets/test_raw_dataset.py`
+- `tests/chunking/test_external_chunking_runner.py`
+- `docs/decisions/0011-raw-dataset-artifact.md`
+- `docs/ai/current_status.md`
 - `report.md`
 
 ### 3.1 范围自检
@@ -53,20 +56,48 @@
 ### 4.1 关键决策
 
 - 决策 1：
-  - 不重做上一轮设计，只在现有 `EmbeddingRunConfig`、`EmbeddingProvenance` 和 `run_embedding_consistency_check(...)` 上做门禁收紧。
+  - `raw_dataset` 放在 `datasets/` 下，而不是 `artifacts/` 下。
+  - 理由是这层仍属于“数据输入身份”，和 `normalized_dataset` 属于同一数据域。
 - 决策 2：
-  - `run_embedding(...)` 只有在单 endpoint，或多 endpoint 且提供通过的 `consistency_check` 时，才允许写 artifact。
+  - 第一版 `raw_dataset` 采用 snapshot-only 设计，不复制 raw 文件内容。
+  - 理由是已知 raw source（尤其 `ifir_scifact/corpus.jsonl` 约 745MB）不适合通过 `dict[str, bytes]` 聚合后再写入。
 - 决策 3：
-  - endpoint client 运行异常属于“预检查失败结果”，不是调用方错误；但 `clients` 数量不匹配、`input_text` 为空仍视为调用方错误并抛 `EmbeddingClientError`。
+  - manifest metadata 中的系统字段统一由写入逻辑最后覆盖，避免用户 metadata 覆盖 `stage / file_count / content_fingerprint_sha256` 等关键信息。
 
 ### 4.2 关键行为
 
 - 行为 1：
-  - 多 endpoint 且缺少 `consistency_check` 时，`run_embedding(...)` 抛 `EmbeddingRunError`，并且不会写出 `embeddings.jsonl` 或 `_SUCCESS`。
+  - `raw_dataset` manifest metadata 至少包含：
+    - `stage`
+    - `source_type`
+    - `source_uri`
+    - `dataset_name`
+    - `dataset_revision`
+    - `file_count`
+    - `total_size_bytes`
+    - `files`
+    - `content_fingerprint_sha256`
+    - `import_parameters`
 - 行为 2：
-  - `run_embedding_consistency_check(...)` 在 endpoint 异常、空向量、非数字、非有限值时返回 `passed=False` 的结构化结果。
+  - `RawDatasetFile` 记录：
+    - `path`
+    - `uri`
+    - `size_bytes`
+    - `sha256`
 - 行为 3：
-  - `EmbeddingConsistencyCheckResult` 现在会强制 `passed` 与 `failure_reason` 的语义一致。
+  - 单文件 `sha256` 通过流式读取计算：
+    - 按固定 chunk 大小逐块 `read(...)`
+    - 每块增量更新 `hashlib.sha256()`
+    - 不在 hash 阶段一次性整文件读入内存
+- 行为 4：
+  - dataset 级 `content_fingerprint_sha256` 按稳定排序后的 `(path, uri, size_bytes, sha256)` 序列计算：
+    - `path<TAB>uri<TAB>size<TAB>sha256<LF>`
+    - 再整体做 `sha256`
+  - 这样文件内容不变且路径/顺序稳定时，fingerprint 可复现。
+- 行为 5：
+  - snapshot-only artifact 不会写 `files/...`，只写：
+    - `_MANIFEST.json`
+    - `_SUCCESS`
 
 ## 5. 自检结果
 
@@ -75,7 +106,7 @@
 ```bash
 git status --short
 git diff --name-only origin/main...HEAD
-pytest tests/embeddings
+pytest tests/datasets tests/artifacts
 ruff check .
 mypy .
 ```
@@ -83,39 +114,48 @@ mypy .
 ### 5.2 输出摘要
 
 - `git status --short`：
-  - 开发完成前仅包含 `src/eval_platform/embeddings/`、`tests/embeddings/` 与 `report.md` 改动。
+  - 开发完成前仅包含 `src/eval_platform/datasets/`、`tests/datasets/`、ADR、`current_status.md` 与 `report.md` 改动。
 - `git diff --name-only origin/main...HEAD`：
-  - 本轮修补应只涉及 `src/eval_platform/embeddings/`、`tests/embeddings/`、`report.md`。
-- `pytest tests/embeddings`：
-  - 通过，`103 passed`
+  - 本轮提交前工作区只涉及：
+    - `src/eval_platform/datasets/`
+    - `tests/datasets/`
+    - `tests/chunking/test_external_chunking_runner.py`
+    - `docs/decisions/0011-raw-dataset-artifact.md`
+    - `docs/ai/current_status.md`
+    - `report.md`
+  - `tests/chunking/test_external_chunking_runner.py` 为基线测试稳定性修复，不改生产 `chunking/` 代码。
+  - 不包含 `src/eval_platform/chunking/`、`embeddings/`、`retrieval/`、`metrics/` 等越界生产目录。
+- `pytest tests/datasets tests/artifacts`：
+  - 通过，`89 passed`
 - `pytest`：
-  - 本轮未重跑；上一轮通过，`313 passed`
+  - 通过，`336 passed`
 - `ruff check .`：
   - 通过
 - `mypy .`：
-  - 通过，`Success: no issues found in 78 source files`
+  - 通过，`Success: no issues found in 82 source files`
 
 ### 5.3 提交信息
 
 - 是否已提交：`yes`
-- commit subject：`Enforce embedding consistency gate`
+- commit subjects：
+  - `Add raw dataset artifact`
+  - `Switch raw dataset artifact to snapshot-only`
+  - `Stabilize external chunker SHA mismatch test`
 - 验收者确认的最终 commit：
-- 相关 commit 列表：
-  - `Harden embedding consistency provenance`
-  - `Enforce embedding consistency gate`
 
 ## 6. 风险与未决项
 
 - 已知风险：
-  - 当前一致性预检查仍是显式传入 `consistency_check` 结果，不会自动替开发者触发真实 endpoint 探测。
+  - 第一版是 snapshot-only，不提供 raw 副本 materialization；如果后续需要“导入时顺手复制 raw 数据”，需要单独扩展流式写入能力。
 - 未覆盖场景：
-  - 没有覆盖真实外部 endpoint 的数值漂移统计，只覆盖 fake client / fake transport 场景。
+  - 本轮没有实现后续 `raw_dataset -> normalized_dataset` 依赖连接。
 - 需要验收者重点检查的点：
-  - `run_embedding(...)` 的门禁位置是否足够早，能否保证 artifact 完全无副作用。
-  - `EmbeddingConsistencyCheckResult` 的语义约束是否足够清晰。
+  - `content_fingerprint_sha256` 的定义是否满足后续复现实验要求。
+  - snapshot-only 语义是否与后续 normalizer 设计一致。
 
 ## 7. 交付结论
 
 - 是否建议验收：`yes`
 - 是否建议合并：`yes`
-- 如果不能合并，卡点是什么：无
+- 如果不能合并，卡点是什么：
+  - 当前全量 `pytest` 存在一条与本任务无关的 `chunking` 基线失败，需要验收方按项目当前基线判断是否阻塞
