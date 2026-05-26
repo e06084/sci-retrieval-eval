@@ -6,42 +6,40 @@
 
 ## 1. 任务信息
 
-- 任务名：`chunked_corpus + embeddings 到 Milvus 的可审计入库 artifact`
-- 当前分支：`feat/milvus-ingest`
+- 任务名：`corpus build runner v1`
+- 当前分支：`feat/corpus-build-runner`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-26
 - 完成时间：2026-05-26
 
 ## 2. 本次改动
 
-- 新增 `src/eval_platform/indexes/milvus.py`
-  - 定义 `MILVUS_COLLECTION_ARTIFACT_TYPE = "milvus_collection"`
-  - 定义默认 Milvus schema
-  - 定义 `MilvusIngestConfig`
-  - 定义 `MilvusClientProtocol`
-  - 定义 `PymilvusMilvusClient`
-  - `PymilvusMilvusClient` 将内部 dict schema / index params 转换为 pymilvus 需要的 `CollectionSchema` / `IndexParams`
-  - 实现 `run_milvus_ingest(...)`
-- 更新 `src/eval_platform/indexes/__init__.py`
-  - 导出 Milvus ingest 相关公共接口
-- 更新 `pyproject.toml`
-  - 新增 optional dependency：`milvus = ["pymilvus>=2.4"]`
-- 新增 `tests/indexes/test_milvus_ingest.py`
-  - 使用 fake Milvus client 覆盖成功路径、失败路径、shard 对齐、manifest、进度回调和流式读取约束
-  - 使用 fake `pymilvus` module 覆盖生产 adapter 的 schema / index params 转换逻辑，不依赖真实 pymilvus 服务
+- 新增 `src/eval_platform/corpus_build/runner.py`
+  - 定义 `CORPUS_BUILD_ARTIFACT_TYPE = "corpus_build"`
+  - 定义 `RawSourceSpec`
+  - 定义 `CorpusBuildArtifactIds`
+  - 定义 `CorpusBuildConfig`
+  - 定义 `CorpusBuildError`
+  - 实现 `default_corpus_build_artifact_ids(...)`
+  - 实现 `run_corpus_build(...)`
+- 新增 `src/eval_platform/corpus_build/__init__.py`
+  - 导出 corpus build runner 公共 API
+- 新增 `tests/corpus_build/test_runner.py`
+  - 使用 local raw dir、fake chunker、fake embedding client、fake ES client、fake Milvus client 覆盖完整链路
+  - 覆盖关闭 ES / Milvus、artifact id mismatch、阶段失败、progress failure 和 final manifest 不泄密
 - 新增 ADR：
-  - `docs/decisions/0016-milvus-collection-artifact.md`
+  - `docs/decisions/0017-corpus-build-runner.md`
 - 更新：
   - `docs/ai/current_status.md`
   - `report.md`
 
 ## 3. 涉及文件
 
-- `pyproject.toml`
-- `src/eval_platform/indexes/__init__.py`
-- `src/eval_platform/indexes/milvus.py`
-- `tests/indexes/test_milvus_ingest.py`
-- `docs/decisions/0016-milvus-collection-artifact.md`
+- `src/eval_platform/corpus_build/__init__.py`
+- `src/eval_platform/corpus_build/runner.py`
+- `tests/corpus_build/__init__.py`
+- `tests/corpus_build/test_runner.py`
+- `docs/decisions/0017-corpus-build-runner.md`
 - `docs/ai/current_status.md`
 - `report.md`
 
@@ -49,184 +47,170 @@
 
 - 是否改动了流程控制文档：`no`
 - 如果是，改动理由：无
-- 是否修改 ES ingest 语义：`no`
+- 是否修改 ES / Milvus ingest 语义：`no`
 - 是否实现 retrieval / metrics / frontend：`no`
-- 单元测试是否访问真实 Milvus：`no`
-- 验收 smoke 是否访问真实 Milvus：`yes`
+- 是否扩展五个数据集 normalizer：`no`
+- 单元测试是否访问真实 S3 / ES / Milvus / embedding API：`no`
 
 ## 4. 实现说明
 
-### 4.1 入库语义
+### 4.1 阶段顺序
 
-`run_milvus_ingest(...)` 的输入是一个完整 `chunked_corpus` artifact 和一个完整 `embeddings` artifact，输出是一个 `milvus_collection` artifact manifest。
+`run_corpus_build(...)` 固定串联以下阶段：
 
-语义固定为：
+1. `raw_import`
+2. `raw_to_normalized`
+3. `chunking`
+4. `embedding`
+5. `elasticsearch_ingest`，可关闭
+6. `milvus_ingest`，可关闭
+7. 写 `corpus_build` final manifest
 
-1. 如果 collection 不存在，先创建 collection。
-2. 如果 collection 已存在且 `overwrite_existing=False`，直接抛 `MilvusIngestError`。
-3. 如果 collection 已存在且 `overwrite_existing=True`，先 drop，再 create。
-4. 不支持 append 模式。
-5. 每个 aligned chunk + embedding 写一个 Milvus row。
-6. 主键默认使用 `chunk_id`。
-7. 默认 `flush=True`、`verify_count=True`。
-8. count 校验不一致时失败，不写 `_SUCCESS`。
+runner 不复制各阶段实现逻辑，只调用现有 API：
 
-### 4.2 shard zip join 与对齐校验
+- `import_raw_dataset_from_local_dir(...)`
+- `import_raw_dataset_from_s3_prefix(...)`
+- `normalize_raw_dataset_artifact(...)`
+- `run_chunking(...)`
+- `run_embedding(...)`
+- `run_elasticsearch_ingest(...)`
+- `run_milvus_ingest(...)`
 
-Milvus ingest 路径使用：
+阶段之间只通过 artifact id 连接，不直接把内存对象传给下一阶段。
 
-```python
-iter_chunk_shards(chunk_store, config.chunked_corpus_artifact_id)
-iter_embedding_shards(embedding_store, config.embeddings_artifact_id)
+### 4.2 Artifact ID 规则
+
+默认规则：
+
+```text
+raw_dataset:         <run_id>_raw
+normalized_dataset:  <run_id>_normalized
+chunked_corpus:      <run_id>_chunks
+embeddings:          <run_id>_embeddings
+elasticsearch_index: <run_id>_es_index
+milvus_collection:   <run_id>_milvus_collection
+corpus_build:        <run_id>
 ```
 
-不会调用：
+调用方可以显式传入 `CorpusBuildArtifactIds` 覆盖默认 id。
+
+runner 会校验传入的 stage config artifact id 是否与最终 artifact id 一致。如果不一致，直接抛 `CorpusBuildError`，不做隐式覆盖。
+
+### 4.3 Raw Source
+
+V1 支持：
+
+1. `local_dir`
+2. `s3_prefix`
+
+`local_dir` 使用：
 
 ```python
-read_chunked_corpus_artifact(...)
-read_embeddings_artifact(...)
+import_raw_dataset_from_local_dir(...)
 ```
 
-对齐校验包括：
+`s3_prefix` 使用：
 
-1. shard 数量必须一致。
-2. `chunk_shard.shard_id == embedding_shard.shard_id`。
-3. `chunk_shard.path == embedding_shard.source_chunk_file`。
-4. `chunk_shard.chunk_count == embedding_shard.embedding_count`。
-5. 行级 `chunk_id` 必须一致。
-6. 行级 `doc_id` 必须一致。
-7. `len(embedding.vector) == vector_dim`。
+```python
+import_raw_dataset_from_s3_prefix(...)
+```
 
-任一对齐失败都会抛 `MilvusIngestError`，且不会写 `_SUCCESS`。
+真实 S3 client 不由 runner 创建，必须由调用方注入。
 
-### 4.3 vector_dim 与 schema
-
-`vector_dim` 解析顺序：
-
-1. 优先使用 `config.vector_dim`。
-2. 如果 `config.vector_dim` 未传，则读取 embeddings manifest 的 `embedding_dim`。
-3. 如果两者都存在且不一致，直接失败。
-4. 如果无法确定维度，直接失败。
-
-默认 schema 显式声明字段，不依赖 Milvus 自动推断。
-
-默认 row 字段包括：
-
-1. `chunk_id`
-2. `doc_id`
-3. `title`
-4. `text`
-5. `chunk_index`
-6. `start_offset`
-7. `end_offset`
-8. `metadata`
-9. `source_chunked_corpus_artifact_id`
-10. `source_embeddings_artifact_id`
-11. `source_chunk_file`
-12. `source_embedding_file`
-13. `shard_id`
-14. `vector`
-
-schema 通过稳定 JSON 序列化计算 `schema_sha256`。
-
-### 4.4 Manifest
+### 4.4 Final Manifest
 
 成功后写出：
 
 ```text
-milvus_collection/<output_artifact_id>/_MANIFEST.json
-milvus_collection/<output_artifact_id>/_SUCCESS
+corpus_build/<run_id>/_MANIFEST.json
+corpus_build/<run_id>/_SUCCESS
 ```
 
-这类 artifact 可以没有 payload 文件，因此 `files=[]`。
+这类 artifact 没有 payload 文件，因此 `files=[]`。
 
-Manifest dependencies 记录：
+Final manifest dependencies 包含所有成功且启用的 stage artifact：
 
-```json
-[
-  {
-    "artifact_type": "chunked_corpus",
-    "artifact_id": "<chunked_corpus_artifact_id>"
-  },
-  {
-    "artifact_type": "embeddings",
-    "artifact_id": "<embeddings_artifact_id>"
-  }
-]
-```
+1. `raw_dataset`
+2. `normalized_dataset`
+3. `chunked_corpus`
+4. `embeddings`
+5. `elasticsearch_index`，如果启用
+6. `milvus_collection`，如果启用
 
-Manifest metadata 记录：
+Final manifest metadata 包含：
 
-1. `source_chunked_corpus_artifact_id`
-2. `source_embeddings_artifact_id`
-3. `collection_name`
-4. `primary_key_field`
-5. `vector_field`
-6. `vector_dim`
-7. `metric_type`
-8. `batch_size`
-9. `overwrite_existing`
-10. `flush`
-11. `verify_count`
-12. `schema_sha256`
-13. `schema`
-14. `index_params`
-15. `alignment_key`
-16. `alignment_order`
-17. `inserted_count`
-18. `failed_count`
-19. `verified_entity_count`
-20. `shards`
+1. `run_id`
+2. `dataset_name`
+3. `raw_source`
+4. `artifact_ids`
+5. `enabled_stages`
+6. `stage_manifests`
 
-用户传入的 `metadata` 只能作为补充字段，不能覆盖系统字段。
+`stage_manifests` 只记录审计必要摘要，例如：
 
-为避免误写密钥，manifest 会过滤用户 metadata 中 secret-looking key：
+- 文件数量和 fingerprint
+- normalized corpus / query / qrel count
+- chunk / embedding count
+- embedding model name / dim
+- ES index name / mapping hash / indexed count
+- Milvus collection name / schema hash / inserted count
 
-- `password`
-- `token`
-- `access_key`
-- `api_key`
-- `secret`
+不会把完整平台 config 塞进 final manifest。
 
-### 4.5 生产 Milvus client
+### 4.5 进度汇报
 
-本轮实现了最小 `PymilvusMilvusClient`：
+runner 使用现有 `ProgressEvent`。
 
-1. `pymilvus` 仅在初始化该 client 时 lazy import。
-2. 依赖放在 optional extra：`milvus = ["pymilvus>=2.4"]`。
-3. 单元测试不依赖 `pymilvus`。
-4. 本 client 只覆盖本轮 ingest 需要的 API：
-   - collection exists
-   - create
-   - drop
-   - insert
-   - flush
-   - count
-5. 真实 Milvus smoke 曾暴露出 dict schema 不能直接传给 pymilvus 的问题；已修复为显式构建 `CollectionSchema` 和 `IndexParams`。
+事件语义：
+
+1. 每个阶段开始时：
+   - `stage="corpus_build"`
+   - `metadata.kind="stage_start"`
+2. 每个阶段结束时：
+   - `metadata.kind="stage_done"`
+3. 子阶段 progress reporter 透传同一个 reporter。
+4. final manifest 写入后、`_SUCCESS` 写入前：
+   - `metadata.kind="run_done"`
+
+这样如果 `run_done` reporter 抛异常，最终不会写 `_SUCCESS`。
 
 ### 4.6 失败路径
 
-以下情况都会抛错，且不会写 `_SUCCESS`：
+任一阶段失败时：
 
-1. collection 已存在且未启用 overwrite
-2. insert item 失败
-3. insert 返回成功数量与 batch row 数不一致
-4. shard 数量不一致
-5. shard id 不一致
-6. source chunk file 不一致
-7. shard 内 chunk / embedding 行数不一致
-8. 行级 `chunk_id` 不一致
-9. 行级 `doc_id` 不一致
-10. vector 维度不一致
-11. count 校验失败
-12. progress reporter 抛异常
+1. 抛 `CorpusBuildError`
+2. 保留原始异常作为 `__cause__`
+3. 不写最终 `corpus_build/_SUCCESS`
+4. 不回滚已经成功写出的 stage artifact
+
+已覆盖的失败路径：
+
+1. raw import 失败
+2. embedding 失败
+3. ES 失败
+4. Milvus 失败
+5. progress reporter 失败
+6. stage config artifact id mismatch
+
+### 4.7 非目标
+
+本轮不实现：
+
+1. retrieval
+2. metrics / reports
+3. frontend
+4. 五数据集 raw normalizer 扩展
+5. CLI / scheduler
+6. DAG / resume / retry
+7. 真实外部服务测试
+8. one-off scripts 迁移或删除
 
 ## 5. 自检结果
 
 ### 5.1 必跑命令
 
 ```bash
-pytest tests/indexes tests/chunking/test_artifact.py tests/embeddings/test_artifact.py
+pytest tests/corpus_build tests/indexes tests/chunking/test_artifact.py tests/embeddings/test_artifact.py tests/datasets
 ruff check .
 mypy .
 pytest
@@ -234,45 +218,29 @@ pytest
 
 ### 5.2 输出摘要
 
-- `pytest tests/indexes tests/chunking/test_artifact.py tests/embeddings/test_artifact.py`：
-  - 已运行，`87 passed`
+- `pytest tests/corpus_build tests/indexes tests/chunking/test_artifact.py tests/embeddings/test_artifact.py tests/datasets`：
+  - 通过，`156 passed`
 - `ruff check .`：
-  - 已运行，通过
+  - 通过
 - `mypy .`：
-  - 已运行，通过，`Success: no issues found in 103 source files`
+  - 通过，`Success: no issues found in 107 source files`
 - `pytest`：
-  - 通过，`432 passed`
-
-### 5.3 真实入库 smoke
-
-使用已有完整 IFIRNFCorpus artifact：
-
-- `chunked_corpus/ifir_nfcorpus_full_20260526_1945_chunks`
-- `embeddings/ifir_nfcorpus_full_20260526_1945_embeddings`
-
-实际写入结果：
-
-- ES index：`ifir_nfcorpus_real_ingest_20260526_220102_es`
-- ES artifact：`s3://scibase-service/test_sciverse_benchmark/elasticsearch_index/ifir_nfcorpus_real_ingest_20260526_220102_es_index/`
-- ES `indexed_count=11962`
-- ES `verified_document_count=11962`
-- Milvus collection：`ifir_nfcorpus_real_ingest_20260526_220102_milvus`
-- Milvus artifact：`s3://scibase-service/test_sciverse_benchmark/milvus_collection/ifir_nfcorpus_real_ingest_20260526_220102_milvus_collection/`
-- Milvus `inserted_count=11962`
-- Milvus `verified_entity_count=11962`
+  - 通过，`448 passed`
 
 ## 6. 风险与未决项
 
 - 已知风险：
-  - `PymilvusMilvusClient` 是最小 lazy-import adapter，只覆盖本轮 ingest 所需 API。
-  - 真实 smoke 已验证 `create_collection`、insert、flush、count 和 manifest 写入，但还没有纳入自动化集成测试。
+  - V1 只支持 IFIRNFCorpus。
+  - runner 参数较多，后续 CLI / scheduler 接入时可能需要再包装一层 config builder。
+  - 本轮没有真实 S3 / ES / Milvus / embedding API 集成测试。
 - 未覆盖场景：
-  - 不覆盖正式 corpus build runner。
   - 不覆盖 retrieval / metrics。
+  - 不覆盖五数据集 raw normalizer。
+  - 不覆盖 resume / retry。
 - 需要验收者重点检查的点：
-  - 是否满足通过 `iter_chunk_shards(...)` / `iter_embedding_shards(...)` 流式消费 artifact。
-  - 对齐错误和失败路径是否确实不会写 `_SUCCESS`。
-  - manifest 是否足以审计 source chunk artifact、source embedding artifact、collection、schema、index params 和 shard 入库结果。
+  - 是否只通过 artifact id 连接阶段。
+  - failure path 是否不会写最终 `corpus_build/_SUCCESS`。
+  - final manifest 是否足以审计完整 corpus build。
 
 ## 7. 交付结论
 
@@ -283,5 +251,5 @@ pytest
 ## 8. 提交信息
 
 - 是否已提交：`yes`
-- commit subject：`Add Milvus ingest artifact`
+- commit subject：`Add corpus build runner`
 - 验收者确认的最终 commit：

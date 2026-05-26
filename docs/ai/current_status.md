@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Milvus ingest artifact in progress.
+Corpus build runner v1 in progress.
 
 ## Implemented
 
@@ -25,18 +25,20 @@ Milvus ingest artifact in progress.
 - Reusable progress reporter for raw-to-normalized / chunking / embedding
 - Elasticsearch ingest runner from sharded `chunked_corpus` to auditable `elasticsearch_index` artifact
 - Milvus ingest runner from aligned sharded `chunked_corpus` + `embeddings` to auditable `milvus_collection` artifact
+- Corpus build runner v1 for IFIRNFCorpus with run-level `corpus_build` artifact
 
 ## In Progress
 
-- Milvus ingest PR validation; full IFIRNFCorpus ES + Milvus real ingest smoke passed
+- Corpus build runner PR validation
 
 ## Not Implemented
 
-- Corpus build runner
 - Retrieval pipeline
 - Metrics and reports
 - Frontend dashboard
+- Multi-dataset raw normalizer expansion
+- Corpus build CLI / scheduler
 
 ## Next Task
 
-Open and merge Milvus ingest PR, then start corpus build runner orchestration.
+Open and merge corpus build runner PR, then start retrieval pipeline design.
