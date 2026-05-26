@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Metrics run artifact ready for merge review.
+Live retrieval adapters ready for merge review.
 
 ## Implemented
 
@@ -30,19 +30,19 @@ Metrics run artifact ready for merge review.
 - Corpus build runner dataset allowlist backed by the raw normalizer registry
 - Retrieval hit/result schemas, RRF fusion, retrieval client protocols, retrieval runner, replay trace, replay execution mode, and `retrieval_run` artifact
 - Metrics run artifact, chunk-to-doc projection, MTEB-style IR metrics, and metrics runner
+- Live Elasticsearch and Milvus retrieval adapters with config factories
 
 ## In Progress
 
-- Metrics run artifact PR validation
+- Live retrieval adapters PR validation
 
 ## Not Implemented
 
 - Frontend dashboard
 - Corpus build CLI / scheduler
-- Real Elasticsearch retrieval adapter
-- Real Milvus retrieval adapter
 - Real rewrite / rerank adapters
+- Benchmark runner
 
 ## Next Task
 
-Open and merge metrics run artifact PR, then start benchmark runner design.
+Open and merge live retrieval adapters PR, then start benchmark runner design.

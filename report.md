@@ -4,209 +4,196 @@
 
 ## 1. 任务信息
 
-- 任务名：`metrics_run artifact`
-- 当前分支：`feat/metrics-run-artifact`
+- 任务名：`live retrieval adapters`
+- 当前分支：`feat/live-retrieval-adapters`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-27
 - 完成时间：2026-05-27
 
 ## 2. 本次改动
 
-- 新增 `metrics_run` schema：
-  - `RankedDoc`
-  - `ProjectionStats`
-  - `QueryMetricsRecord`
-  - `MetricsRunData`
-- 新增 chunk-level hits 到 doc-level ranking 的投影：
-  - `project_retrieval_result_to_docs(...)`
-- 新增 IR metrics 公式：
-  - `compute_query_metrics(...)`
-  - `aggregate_query_metrics(...)`
-- 新增 `metrics_run` artifact IO：
-  - `write_metrics_run_artifact(...)`
-  - `read_metrics_run_artifact(...)`
-  - manifest metadata 写入 `queries_per_shard`，并作为系统字段防止用户 metadata 覆盖
-- 新增 metrics runner：
-  - `MetricsRunConfig`
-  - `run_metrics(...)`
+- 新增 Elasticsearch retrieval adapter：
+  - `HTTPElasticsearchRetrievalClientConfig`
+  - `HTTPElasticsearchRetrievalClient`
+  - `ElasticsearchRetrievalAdapterError`
+  - `elasticsearch_retrieval_client_from_config(...)`
+- 新增 Milvus retrieval adapter：
+  - `PymilvusRetrievalClientConfig`
+  - `PymilvusRetrievalClient`
+  - `MilvusRetrievalAdapterError`
+  - `milvus_retrieval_client_from_config(...)`
 - 更新公共导出：
-  - `src/eval_platform/metrics/__init__.py`
+  - `src/eval_platform/retrieval/__init__.py`
 - 新增 ADR：
-  - `docs/decisions/0020-metrics-run-artifact.md`
+  - `docs/decisions/0021-live-retrieval-adapters.md`
 - 更新：
   - `docs/ai/current_status.md`
   - `report.md`
 - 新增测试：
-  - `tests/metrics/test_projection.py`
-  - `tests/metrics/test_ir.py`
-  - `tests/metrics/test_artifact.py`
-  - `tests/metrics/test_runner.py`
+  - `tests/retrieval/test_elasticsearch_adapter.py`
+  - `tests/retrieval/test_milvus_adapter.py`
 
-## 3. Artifact 结构
+## 3. Elasticsearch Adapter
 
-新增 artifact type：
+`search_bm25(index_name, query, top_k)` 使用标准库 HTTP，测试通过 fake transport 注入。
 
-```text
-metrics_run
-```
-
-文件结构：
+请求路径：
 
 ```text
-metrics_run/<artifact_id>/
-  metrics.json
-  query_metrics/part-00000.jsonl
-  query_metrics/part-00001.jsonl
-  _MANIFEST.json
-  _SUCCESS
+POST /<index_name>/_search
 ```
 
-`metrics.json` 保存：
+请求 body：
 
-- `aggregate`
-- `k_values`
-- `main_score`
-- `main_score_metric`
-
-`query_metrics/*.jsonl` 每条记录保存：
-
-- `query_id`
-- `query_text`
-- `retrieval_error`
-- `ranked_docs`
-- `relevant_docs`
-- `metrics`
-- `projection_stats`
-
-## 4. Projection 规则
-
-默认策略：
-
-```text
-doc_aggregation = first_chunk_rank
-doc_score = reciprocal_first_chunk_rank
+```json
+{
+  "size": 10,
+  "query": {
+    "multi_match": {
+      "query": "...",
+      "fields": ["title^1.5", "text"]
+    }
+  },
+  "sort": [
+    {"_score": {"order": "desc"}},
+    {"chunk_id": {"order": "asc"}}
+  ],
+  "_source": [
+    "chunk_id",
+    "doc_id",
+    "title",
+    "text",
+    "chunk_index",
+    "start_offset",
+    "end_offset",
+    "metadata"
+  ]
+}
 ```
 
-规则：
+返回解析：
 
-- 按 chunk hit 的 `rank` 升序处理。
-- `doc_id` 为空的 hit 跳过，并计入 `missing_doc_id_hit_count`。
-- 同一个 `doc_id` 只保留第一次出现的 chunk，并计入后续重复 `duplicate_doc_hit_count`。
-- doc-level rank 从 1 重新连续编号。
-- doc-level score 使用 `1 / source_chunk_rank`。
-- 不在 retrieval 阶段提前做 doc 聚合。
+- `chunk_id` 优先用 `_source.chunk_id`，缺失时 fallback 到 `_id`。
+- `doc_id` / `title` / `text` 来自 `_source`。
+- `score` 和 `origin_es_score` 来自 `_score`。
+- `recall_source = "es"`。
+- `metadata` 保留 `_source.metadata` 以及 `chunk_index` / `start_offset` / `end_offset`。
 
-## 5. Metrics 公式
+`enrich_by_chunk_ids(...)`：
 
-默认 `k_values`：
+- 使用 `POST /<index_name>/_mget`。
+- 保持输入 hits 顺序。
+- 保留原 hit 的 `score`、`recall_source`、`origin_es_score`、`origin_milvus_score`。
+- 补齐 `doc_id` / `title` / `text` / `metadata`。
+- 缺失 chunk 不重排，保留原 hit，并设置 `metadata["enrich_missing"] = True`。
 
-```text
-[1, 3, 5, 10, 20, 100, 1000]
+错误处理：
+
+- HTTP 非 2xx 抛 `ElasticsearchRetrievalAdapterError`。
+- invalid JSON 抛 `ElasticsearchRetrievalAdapterError`。
+- 错误信息不包含 password / Authorization header。
+
+## 4. Milvus Adapter
+
+`PymilvusRetrievalClient` lazy-import `pymilvus.MilvusClient`。
+
+构造行为：
+
+- 测试可传入 fake `client`，不会 import 或访问真实 Milvus。
+- 未安装 `pymilvus` 且未传入 client 时，抛 `MilvusRetrievalAdapterError`，提示安装 `milvus` extra。
+
+`search(collection_name, vector, top_k)` 调用：
+
+```python
+client.search(
+    collection_name=collection_name,
+    data=[list(vector)],
+    anns_field=vector_field,
+    limit=top_k,
+    output_fields=output_fields,
+    search_params={"metric_type": metric_type, "params": search_params},
+)
 ```
 
-实现指标：
+返回解析：
 
-- `precision_at_k = top_k positive doc count / k`
-- `recall_at_k = top_k positive doc count / positive doc count`
-- `hit_rate_at_k = top_k 是否至少命中一个 positive doc`
-- `mrr_at_k = 1 / 第一个 positive doc rank`
-- `map_at_k = sum(precision@rank for positive hits <= k) / positive doc count`
-- `ndcg_at_k = dcg / idcg`，使用 graded relevance
+- 支持 pymilvus 常见 `list[list[dict]]` 结构。
+- `chunk_id` 来自 `entity[primary_key_field]`，缺失时 fallback 到 hit `id`。
+- `score` 和 `origin_milvus_score` 来自 `distance` 或 `score`。
+- `doc_id` / `title` / `text` / `metadata` 来自 `entity`。
+- `recall_source = "milvus"`。
+- 不把 `vector` 或配置的 `vector_field` 写入 `RetrievalHit.metadata`。
 
-聚合规则：
+## 5. Config Factory
 
-- 先计算 per-query metrics。
-- aggregate 是 evaluated queries 的算术平均。
-- retrieval error / missing result query 只要有 positive qrels，就计入平均且指标为 0。
+新增：
 
-## 6. Query Universe 和异常处理
+```python
+elasticsearch_retrieval_client_from_config(config: ElasticsearchConfig)
+milvus_retrieval_client_from_config(config: MilvusConfig)
+```
 
-- evaluated query universe 以 `normalized_dataset.qrels` 中 `relevance > 0` 的 query 为准。
-- 有 positive qrels 但缺 retrieval result：空结果计分，并计入 `missing_result_query_count`。
-- retrieval result 有 `error`：空结果计分，并计入 `failed_retrieval_query_count`。
-- retrieval result 不在 positive qrels 中：忽略，并计入 `ignored_result_query_count`。
-- qrels 中没有 positive doc 的 query：跳过，并计入 `skipped_no_positive_qrels_query_count`。
+行为：
 
-## 7. Manifest
+- `elasticsearch.url` 缺失时报明确错误。
+- `milvus.address` 缺失时报明确错误。
+- 不读取环境变量。
+- 不把 secret 写入 report / manifest / error message。
 
-manifest metadata 记录：
+## 6. 测试策略
 
-- `stage = metrics_run`
-- `source_normalized_dataset_artifact_id`
-- `source_retrieval_run_artifact_id`
-- `k_values`
-- `doc_aggregation`
-- `doc_score`
-- `main_score_metric`
-- `main_score`
-- `query_count`
-- `evaluated_query_count`
-- `missing_result_query_count`
-- `failed_retrieval_query_count`
-- `ignored_result_query_count`
-- `skipped_no_positive_qrels_query_count`
-- `missing_doc_id_hit_count`
-- `duplicate_doc_hit_count`
-- `queries_per_shard`
-- `query_metric_file_count`
-- `query_metric_record_count`
+- Elasticsearch adapter 测试全部使用 fake HTTP transport。
+- Milvus adapter 测试全部使用 fake Milvus client 或 monkeypatch import。
+- 集成级测试把真实 adapter 类型和 fake transport/client 注入 `run_retrieval(...)`。
+- 未访问真实 ES / Milvus / embedding / rewrite / rerank 服务。
 
-dependencies 记录：
+## 7. 范围自检
 
-- `normalized_dataset`
-- `retrieval_run`
-
-## 8. 范围自检
-
-- 是否重新跑检索：`no`
-- 是否访问真实 ES / Milvus / embedding / rewrite / rerank 服务：`no`
-- 是否实现真实 retrieval adapter：`no`
-- 是否实现完整 benchmark runner：`no`
+- 是否实现 benchmark runner：`no`
+- 是否修改 metrics 逻辑：`no`
+- 是否实现 HTTP rewrite / rerank adapter：`no`
 - 是否实现 CLI / HTTP server：`no`
+- 是否访问真实外部服务：`no`
 - 是否提交 `.local_artifacts` 或真实 config / 密钥：`no`
 - 是否修改流程控制文档：`no`
 
-## 9. 自检结果
+## 8. 自检结果
 
-### 9.1 已运行命令
+### 8.1 已运行命令
 
 ```bash
-pytest tests/metrics
-pytest tests/metrics tests/retrieval
+pytest tests/retrieval
 ruff check .
 mypy .
 pytest
 ```
 
-### 9.2 输出摘要
+### 8.2 输出摘要
 
-- `pytest tests/metrics`
-  - 通过，`13 passed`
-- `pytest tests/metrics tests/retrieval`
-  - 通过，`32 passed`
+- `pytest tests/retrieval`
+  - 通过，`31 passed`
 - `ruff check .`
   - 通过，`All checks passed!`
 - `mypy .`
-  - 通过，`Success: no issues found in 128 source files`
+  - 通过，`Success: no issues found in 132 source files`
 - `pytest`
-  - 通过，`501 passed`
+  - 通过，`513 passed`
 
-## 10. 风险与未决项
+## 9. 风险与未决项
 
-- 本轮实现内置 IR 公式，没有引入 `pytrec_eval` 依赖；后续可加可选 cross-check。
-- 当前 doc projection 只实现 `first_chunk_rank` / `reciprocal_first_chunk_rank`。
-- `main_score_metric` 固定为 `ndcg_at_10`。
-- 本轮不实现完整 benchmark runner 或 CLI。
+- 本轮没有真实 ES / Milvus connectivity smoke，真实环境连通性仍需后续由验收或 smoke 任务执行。
+- 本轮不实现 HTTP rewrite / rerank adapter。
+- 本轮不实现 benchmark runner / CLI。
+- Milvus 返回结构在不同 pymilvus 版本可能有差异；当前覆盖常见 `list[list[dict]]` 形态。
 
-## 11. 交付结论
+## 10. 交付结论
 
 - 是否建议验收：`yes`
 - 是否建议合并：`yes`
 - 如果不能合并，卡点是什么：无
 
-## 12. 提交信息
+## 11. 提交信息
 
 - 是否已提交：`yes`
-- commit subject：`Add metrics run artifact`
-- 返修 commit subject：`Record metrics shard size in manifest`
+- commit subject：`Add live retrieval adapters`
 - 验收者确认的最终 commit：由验收者用 `git log -1 --oneline` 确认
