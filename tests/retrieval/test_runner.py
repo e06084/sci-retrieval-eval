@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,8 @@ from eval_platform.datasets import (
 )
 from eval_platform.retrieval import (
     RETRIEVAL_RUN_ARTIFACT_TYPE,
+    HTTPRerankClient,
+    HTTPRerankClientConfig,
     RetrievalHit,
     RetrievalQueryResult,
     RetrievalRunConfig,
@@ -141,6 +144,29 @@ class FakeRerankClient:
             hit.model_copy(update={"score": 100.0 - index})
             for index, hit in enumerate(reversed(hits[:top_n]), start=1)
         ]
+
+
+class RecordingRerankTransport:
+    def __init__(self, responses: list[tuple[int, bytes]]) -> None:
+        self._responses = responses
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        endpoint_url: str,
+        payload: bytes,
+        headers: dict[str, str],
+        timeout_seconds: float,
+    ) -> tuple[int, bytes]:
+        self.calls.append(
+            {
+                "endpoint_url": endpoint_url,
+                "payload": json.loads(payload.decode("utf-8")),
+                "headers": dict(headers),
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return self._responses[len(self.calls) - 1]
 
 
 def _config(**overrides: Any) -> RetrievalRunConfig:
@@ -336,6 +362,58 @@ def test_run_retrieval_rerank_caps_head_and_preserves_tail(
         "es-alpha query-1",
         "es-alpha query-2",
     ]
+
+
+def test_run_retrieval_rerank_enabled_with_http_rerank_client(
+    store: LocalArtifactStore,
+) -> None:
+    es = FakeElasticsearchClient()
+    transport = RecordingRerankTransport(
+        [
+            (
+                200,
+                b'{"results": ['
+                b'{"index": 1, "relevance_score": 0.95},'
+                b'{"index": 0, "relevance_score": 0.10}'
+                b"]}",
+            )
+        ]
+    )
+    rerank = HTTPRerankClient(
+        HTTPRerankClientConfig(
+            endpoint_url="https://rerank.example/rerank",
+            model_name="BAAI/bge-reranker-v2-m3",
+        ),
+        transport=transport,
+    )
+
+    run_retrieval(
+        store,
+        store,
+        _config(
+            retrieval_mode="es",
+            milvus_collection_artifact_id=None,
+            top_k=2,
+            rerank_enabled=True,
+            rerank_cross_path_topk=2,
+        ),
+        es_client=es,
+        rerank_client=rerank,
+    )
+    records = read_retrieval_run_artifact(store, "retrieval-1")
+
+    assert transport.calls[0]["endpoint_url"] == "https://rerank.example/rerank"
+    assert transport.calls[0]["payload"]["model"] == "BAAI/bge-reranker-v2-m3"
+    assert transport.calls[0]["payload"]["documents"] == [
+        "es text alpha query 1",
+        "es text alpha query 2",
+    ]
+    assert [hit.chunk_id for hit in records[0].hits] == [
+        "es-alpha query-2",
+        "es-alpha query-1",
+    ]
+    assert [hit.rank for hit in records[0].hits] == [1, 2]
+    assert [hit.score for hit in records[0].hits] == [0.95, 0.1]
 
 
 def test_run_retrieval_records_query_error_and_continues(store: LocalArtifactStore) -> None:

@@ -30,6 +30,14 @@ from eval_platform.retrieval.milvus import (
     PymilvusRetrievalClientConfig,
     milvus_retrieval_client_from_config,
 )
+from eval_platform.retrieval.rerank import (
+    HTTPRerankClient,
+    HTTPRerankClientConfig,
+    RerankAdapterError,
+    RerankConsistencyCheckResult,
+    rerank_client_from_config,
+    run_rerank_consistency_check,
+)
 from eval_platform.retrieval.runner import RetrievalRunConfig, RetrievalRunError, run_retrieval
 from eval_platform.retrieval.schema import (
     RetrievalHit,
@@ -44,11 +52,15 @@ __all__ = [
     "ElasticsearchRetrievalAdapterError",
     "HTTPElasticsearchRetrievalClient",
     "HTTPElasticsearchRetrievalClientConfig",
+    "HTTPRerankClient",
+    "HTTPRerankClientConfig",
     "MilvusRetrievalClient",
     "MilvusRetrievalAdapterError",
     "PymilvusRetrievalClient",
     "PymilvusRetrievalClientConfig",
     "RerankClient",
+    "RerankAdapterError",
+    "RerankConsistencyCheckResult",
     "RetrievalArtifactError",
     "RetrievalHit",
     "RetrievalMode",
@@ -63,7 +75,9 @@ __all__ = [
     "load_retrieval_results_jsonl",
     "milvus_retrieval_client_from_config",
     "read_retrieval_run_artifact",
+    "rerank_client_from_config",
     "rrf_fuse",
     "run_retrieval",
+    "run_rerank_consistency_check",
     "write_retrieval_run_artifact",
 ]
