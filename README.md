@@ -1,48 +1,31 @@
 # sci-retrieval-eval
 
-Artifact-driven evaluation platform for scientific literature retrieval.
+Artifact-driven offline evaluation platform for scientific literature retrieval.
 
-## Scope
-
-This repository is intended to become the clean project home for:
-
-- benchmark dataset preparation
-- artifact management on S3
-- chunking and embedding pipelines
-- ES and Milvus index building
-- retrieval inference
-- MTEB-compatible evaluation
-- report generation
-
-The first milestone is project bootstrap. At this stage, the repository provides:
-
-- project rules
-- architecture boundaries
-- package skeleton
-- CLI entry point (`evalctl version`)
-- documentation entry points
+The project exists to make corpus builds, retrieval runs, metric runs, and benchmark comparisons reproducible and auditable across the研发团队.
 
 ## Layout
 
-- `AGENTS.md`: AI collaboration and engineering rules
-- `docs/ai/project_brief.md`: project context for coding agents
-- `docs/ai/current_status.md`: current implementation status
-- `docs/architecture.md`: system architecture
-- `src/eval_platform/`: implementation modules
-- `tests/`: tests organized by module (e.g. `tests/artifacts/`)
+- `AGENTS.md`: agent collaboration rules and file ownership.
+- `TASK.md`: local ignored task file maintained by the validator session.
+- `report.md`: development report updated by the dev session and included in PR evidence.
+- `docs/architecture.md`: project background, architecture, current stage, and engineering principles.
+- `docs/decisions/`: accepted ADRs and design history.
+- `docs/operations/`: real-environment runbooks.
+- `src/eval_platform/`: implementation modules.
+- `tests/`: tests organized by module.
 
-## Planned Modules
+## Main Modules
 
-- `src/eval_platform/artifacts/`
-- `src/eval_platform/datasets/`
-- `src/eval_platform/chunking/`
-- `src/eval_platform/embeddings/`
-- `src/eval_platform/indexes/`
-- `src/eval_platform/retrieval/`
-- `src/eval_platform/mteb_adapter/`
-- `src/eval_platform/metrics/`
-- `src/eval_platform/frontend/`
-- `src/eval_platform/cli/`
+- `artifacts`: local/S3 artifact stores and manifests.
+- `datasets`: raw and normalized dataset schemas and converters.
+- `chunking`: chunk schema, runner, and external chunker provenance.
+- `embeddings`: embedding clients, runner, and artifact IO.
+- `indexes`: Elasticsearch and Milvus ingest artifacts.
+- `retrieval`: retrieval adapters, fusion, rerank integration, traces, replay.
+- `metrics`: MTEB-style metric computation from retrieval artifacts.
+- `benchmark`: retrieval + metrics orchestration.
+- `mteb_adapter`: MTEB data and interface adapters.
 
 ## Development
 
@@ -55,12 +38,4 @@ ruff check .
 
 Project rules for AI coding agents are defined in `AGENTS.md`.
 
-Architecture documents are in `docs/`.
-
-## Current Status
-
-See `docs/ai/current_status.md`.
-
-## Next Step
-
-Open and merge the artifact store PR, then implement the S3 artifact backend.
+Architecture and roadmap context are in `docs/architecture.md`.
