@@ -1,39 +1,33 @@
-"""Compatibility re-exports for corpus asset helpers."""
+"""Corpus asset inventory and planning helpers."""
 
-from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
-from eval_platform.corpus_assets import (  # noqa: E402,F401
+from eval_platform.corpus_assets.inventory import inventory_corpus_assets
+from eval_platform.corpus_assets.naming import (
     ARTIFACT_STAGE_ORDER,
+    STAGE_SUFFIX,
+    artifact_ids_for_dataset,
+    collection_name_for_dataset,
+    index_name_for_dataset,
+    raw_prefix_key,
+    raw_prefix_uri,
+    s3_uri,
+)
+from eval_platform.corpus_assets.planner import build_plan_for_datasets
+from eval_platform.corpus_assets.registry import (
     DATASETS_BY_NAME,
     DATASETS_BY_SLUG,
-    STAGE_SUFFIX,
     TARGET_DATASETS,
     CorpusAssetError,
     DatasetSpec,
-    add_common_args,
-    artifact_ids_for_dataset,
-    build_plan_for_datasets,
-    collection_name_for_dataset,
     dataset_specs_for_selection,
-    index_name_for_dataset,
-    inventory_corpus_assets,
+)
+from eval_platform.corpus_assets.s3 import (
+    add_common_args,
     load_config_and_client,
     make_s3_artifact_store,
     make_s3_client,
     output_payload,
     raw_prefix_exists,
-    raw_prefix_key,
-    raw_prefix_uri,
     redacted_config_summary,
-    s3_uri,
     safe_json_dumps,
 )
 

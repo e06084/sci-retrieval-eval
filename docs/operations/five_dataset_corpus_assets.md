@@ -19,6 +19,26 @@ elasticsearch_index
 milvus_collection
 ```
 
+## Implementation Modules
+
+The reusable corpus asset logic lives under:
+
+```text
+src/eval_platform/corpus_assets/
+```
+
+Module ownership:
+
+- `registry.py`: target dataset specs and dataset selection.
+- `naming.py`: artifact ids, ES/Milvus resource names, and raw S3 prefix naming.
+- `inventory.py`: raw prefix and artifact manifest inventory.
+- `planner.py`: dry-run build planning and `--reuse-existing` chain resolution.
+- `s3.py`: S3 client/store helpers, redacted JSON output, and shared script args.
+
+The scripts in `scripts/` are thin operational wrappers around this package. The
+legacy `scripts/corpus_asset_common.py` file only re-exports the package API for
+temporary compatibility.
+
 ## Raw Layout
 
 The immutable raw prefixes are expected under:
