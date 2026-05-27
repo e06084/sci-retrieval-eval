@@ -476,6 +476,94 @@ def test_run_retrieval_run_with_failed_query_can_be_replayed(
     assert replay_manifest.metadata["failed_query_count"] == 1
 
 
+def test_run_retrieval_fixed_live_artifact_can_be_replayed_without_behavior_changes(
+    store: LocalArtifactStore,
+) -> None:
+    es = FakeElasticsearchClient()
+    embedding = FakeEmbeddingClient()
+    milvus = FakeMilvusClient()
+    rewrite = FakeRewriteClient(["ALPHA QUERY", "beta query", "gamma query"])
+    rerank = FakeRerankClient()
+
+    live_manifest = run_retrieval(
+        store,
+        store,
+        _config(
+            output_artifact_id="contract-live",
+            retrieval_mode="hybrid",
+            top_k=2,
+            query_limit=1,
+            rewrite_enabled=True,
+            sub_queries=2,
+            rerank_enabled=True,
+            rerank_candidate_cap=2,
+            rerank_cross_path_topk=2,
+            trace_mode="replay",
+            execution_mode="live",
+        ),
+        es_client=es,
+        embedding_client=embedding,
+        milvus_client=milvus,
+        rewrite_client=rewrite,
+        rerank_client=rerank,
+    )
+    live_records = read_retrieval_run_artifact(store, "contract-live")
+
+    replay_manifest = run_retrieval(
+        store,
+        store,
+        _config(
+            output_artifact_id="contract-replay",
+            retrieval_mode="hybrid",
+            top_k=2,
+            query_limit=1,
+            rewrite_enabled=True,
+            sub_queries=2,
+            rerank_enabled=True,
+            rerank_candidate_cap=2,
+            rerank_cross_path_topk=2,
+            trace_mode="replay",
+            execution_mode="replay",
+            replay_source_retrieval_run_artifact_id="contract-live",
+        ),
+    )
+    replay_records = read_retrieval_run_artifact(store, "contract-replay")
+
+    assert [record.model_dump(mode="json") for record in replay_records] == [
+        record.model_dump(mode="json") for record in live_records
+    ]
+    assert live_records[0].trace is not None
+    assert live_records[0].trace["rewrite_queries"] == [
+        "alpha query",
+        "beta query",
+        "gamma query",
+    ]
+    assert [hit.chunk_id for hit in live_records[0].hits] == [
+        "es-beta query-1",
+        "es-alpha query-1",
+    ]
+    assert live_manifest.metadata["retrieval_mode"] == "hybrid"
+    assert live_manifest.metadata["trace_mode"] == "replay"
+    assert live_manifest.metadata["execution_mode"] == "live"
+    assert live_manifest.metadata["rerank_candidate_cap"] == 2
+    assert live_manifest.metadata["query_count"] == 1
+    assert replay_manifest.metadata["execution_mode"] == "replay"
+    assert replay_manifest.metadata["replay_source_retrieval_run_artifact_id"] == (
+        "contract-live"
+    )
+    assert [(dep.artifact_type, dep.artifact_id) for dep in live_manifest.dependencies] == [
+        ("normalized_dataset", "normalized-1"),
+        ("elasticsearch_index", "es-artifact"),
+        ("milvus_collection", "milvus-artifact"),
+    ]
+    assert [(dep.artifact_type, dep.artifact_id) for dep in replay_manifest.dependencies] == [
+        ("normalized_dataset", "normalized-1"),
+        ("retrieval_run", "contract-live"),
+    ]
+    assert store.is_complete(RETRIEVAL_RUN_ARTIFACT_TYPE, "contract-live") is True
+    assert store.is_complete(RETRIEVAL_RUN_ARTIFACT_TYPE, "contract-replay") is True
+
+
 def test_run_retrieval_requires_missing_clients_before_writing(
     store: LocalArtifactStore,
 ) -> None:

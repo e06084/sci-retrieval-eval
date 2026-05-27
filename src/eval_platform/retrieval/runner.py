@@ -15,7 +15,6 @@ from eval_platform.embeddings import EmbeddingClient
 from eval_platform.indexes import ELASTICSEARCH_INDEX_ARTIFACT_TYPE, MILVUS_COLLECTION_ARTIFACT_TYPE
 from eval_platform.retrieval.artifact import (
     RETRIEVAL_RUN_ARTIFACT_TYPE,
-    read_retrieval_run_artifact,
     write_retrieval_run_artifact,
 )
 from eval_platform.retrieval.clients import (
@@ -24,18 +23,25 @@ from eval_platform.retrieval.clients import (
     RerankClient,
     RewriteClient,
 )
-from eval_platform.retrieval.fusion import dedupe_by_chunk_id, dedupe_sequential, rrf_fuse
+from eval_platform.retrieval.errors import RetrievalRunError
+from eval_platform.retrieval.fusion import dedupe_by_chunk_id, dedupe_sequential
+from eval_platform.retrieval.query_paths import embed_query_paths, resolve_query_paths
+from eval_platform.retrieval.recall import recall_one
+from eval_platform.retrieval.replay import run_retrieval_replay
+from eval_platform.retrieval.rerank_flow import maybe_rerank, rank_hits
 from eval_platform.retrieval.schema import RetrievalHit, RetrievalQueryResult
+from eval_platform.retrieval.trace import (
+    append_recall_trace,
+    build_error_trace,
+    hits_trace,
+    new_live_trace,
+)
 
 
 def _non_empty_string(value: str, field_name: str) -> str:
     if not value.strip():
         raise ValueError(f"{field_name} must not be empty")
     return value
-
-
-class RetrievalRunError(Exception):
-    """Raised when a retrieval run cannot be executed."""
 
 
 class RetrievalRunConfig(BaseModel):
@@ -132,7 +138,13 @@ def run_retrieval(
     """Run retrieval for normalized queries and write a retrieval_run artifact."""
 
     if config.execution_mode == "replay":
-        return _run_retrieval_replay(source_store, output_store, config)
+        return run_retrieval_replay(
+            source_store,
+            output_store,
+            config,
+            build_manifest_metadata=_build_manifest_metadata,
+            build_dependencies=_build_dependencies,
+        )
 
     _validate_runtime_dependencies(
         config,
@@ -169,7 +181,7 @@ def run_retrieval(
                     query_text=query.text,
                     hits=[],
                     trace=(
-                        _build_error_trace(query.text, exc)
+                        build_error_trace(query.text, exc)
                         if config.trace_mode == "replay"
                         else None
                     ),
@@ -184,35 +196,6 @@ def run_retrieval(
         results,
         queries_per_shard=config.queries_per_shard,
         metadata=metadata,
-        dependencies=_build_dependencies(config),
-        created_by=config.created_by,
-        code_git_sha=config.code_git_sha,
-    )
-
-
-def _run_retrieval_replay(
-    source_store: ArtifactStore,
-    output_store: ArtifactStore,
-    config: RetrievalRunConfig,
-) -> ArtifactManifest:
-    if config.replay_source_retrieval_run_artifact_id is None:
-        raise RetrievalRunError(
-            "replay_source_retrieval_run_artifact_id is required for replay execution"
-        )
-
-    source_records = read_retrieval_run_artifact(
-        source_store,
-        config.replay_source_retrieval_run_artifact_id,
-    )
-    if any(record.trace is None for record in source_records):
-        raise RetrievalRunError("replay source retrieval_run artifact is missing replay trace")
-
-    return write_retrieval_run_artifact(
-        output_store,
-        config.output_artifact_id,
-        source_records,
-        queries_per_shard=config.queries_per_shard,
-        metadata=_build_manifest_metadata(config),
         dependencies=_build_dependencies(config),
         created_by=config.created_by,
         code_git_sha=config.code_git_sha,
@@ -256,19 +239,13 @@ def _retrieve_one_query(
     rewrite_client: RewriteClient | None,
     rerank_client: RerankClient | None,
 ) -> RetrievalQueryResult:
-    queries = _resolve_query_paths(query_text, config, rewrite_client)
-    vectors = _embed_query_paths(queries, config, embedding_client)
+    queries = resolve_query_paths(query_text, config, rewrite_client)
+    vectors = embed_query_paths(queries, config, embedding_client)
     hit_lists: list[list[RetrievalHit]] = []
-    per_query_trace: list[dict[str, Any]] = []
-    trace: dict[str, Any] = {
-        "rewrite_queries": queries,
-        "per_query": per_query_trace,
-        "rerank_input": [],
-        "rerank_hits": [],
-    }
+    trace, per_query_trace = new_live_trace(queries)
 
     for index, query in enumerate(queries):
-        hits, es_hits, milvus_hits, fused_hits = _recall_one(
+        hits, es_hits, milvus_hits, fused_hits = recall_one(
             query=query,
             config=config,
             es_client=es_client,
@@ -277,13 +254,12 @@ def _retrieve_one_query(
             vector=vectors[index] if vectors else None,
         )
         hit_lists.append(hits)
-        per_query_trace.append(
-            {
-                "query": query,
-                "es_hits": [hit.model_dump(mode="json") for hit in es_hits],
-                "milvus_hits": [hit.model_dump(mode="json") for hit in milvus_hits],
-                "fused_hits": [hit.model_dump(mode="json") for hit in fused_hits],
-            }
+        append_recall_trace(
+            per_query_trace,
+            query=query,
+            es_hits=es_hits,
+            milvus_hits=milvus_hits,
+            fused_hits=fused_hits,
         )
 
     if len(hit_lists) == 1:
@@ -294,14 +270,14 @@ def _retrieve_one_query(
         trace["fused_hits"] = single_trace["fused_hits"]
     elif config.rerank_enabled:
         candidates = dedupe_by_chunk_id([hit for hits in hit_lists for hit in hits])
-        trace["fused_hits"] = [hit.model_dump(mode="json") for hit in candidates]
+        trace["fused_hits"] = hits_trace(candidates)
     else:
         candidates = dedupe_sequential(hit_lists, max_total=250)
-        trace["fused_hits"] = [hit.model_dump(mode="json") for hit in candidates]
+        trace["fused_hits"] = hits_trace(candidates)
 
-    final_hits = _maybe_rerank(query_text, candidates, config, rerank_client, trace)
-    ranked_hits = _rank_hits(final_hits[: config.top_k])
-    trace["final_hits"] = [hit.model_dump(mode="json") for hit in ranked_hits]
+    final_hits = maybe_rerank(query_text, candidates, config, rerank_client, trace)
+    ranked_hits = rank_hits(final_hits[: config.top_k])
+    trace["final_hits"] = hits_trace(ranked_hits)
     return RetrievalQueryResult(
         query_id=query_id,
         query_text=query_text,
@@ -309,130 +285,6 @@ def _retrieve_one_query(
         trace=trace if config.trace_mode == "replay" else None,
         error=None,
     )
-
-
-def _build_error_trace(query_text: str, exc: Exception) -> dict[str, Any]:
-    return {
-        "rewrite_queries": [query_text.strip()],
-        "per_query": [],
-        "rerank_input": [],
-        "rerank_hits": [],
-        "final_hits": [],
-        "error": str(exc),
-        "error_stage": "unknown",
-    }
-
-
-def _resolve_query_paths(
-    query_text: str,
-    config: RetrievalRunConfig,
-    rewrite_client: RewriteClient | None,
-) -> list[str]:
-    queries = [query_text.strip()]
-    if config.rewrite_enabled and config.sub_queries > 0:
-        if rewrite_client is None:
-            raise RetrievalRunError("rewrite_client is required when rewrite is enabled")
-        queries.extend(rewrite_client.rewrite(query_text, config.sub_queries))
-    return _dedupe_queries(queries, max_count=1 + config.sub_queries)
-
-
-def _dedupe_queries(values: list[str], *, max_count: int) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        query = value.strip()
-        key = query.lower()
-        if not query or key in seen:
-            continue
-        seen.add(key)
-        out.append(query)
-        if len(out) >= max_count:
-            break
-    return out
-
-
-def _embed_query_paths(
-    queries: list[str],
-    config: RetrievalRunConfig,
-    embedding_client: EmbeddingClient | None,
-) -> list[list[float]]:
-    if config.retrieval_mode not in {"milvus", "hybrid"}:
-        return []
-    if embedding_client is None:
-        raise RetrievalRunError("embedding_client is required for milvus/hybrid retrieval")
-    vectors = embedding_client.embed_texts(queries)
-    if len(vectors) != len(queries):
-        raise RetrievalRunError("embedding client returned a different number of vectors")
-    return vectors
-
-
-def _recall_one(
-    *,
-    query: str,
-    config: RetrievalRunConfig,
-    es_client: ElasticsearchRetrievalClient | None,
-    milvus_client: MilvusRetrievalClient | None,
-    embedding_client: EmbeddingClient | None,
-    vector: list[float] | None = None,
-) -> tuple[list[RetrievalHit], list[RetrievalHit], list[RetrievalHit], list[RetrievalHit]]:
-    if es_client is None or config.index_name is None:
-        raise RetrievalRunError("es_client and index_name are required")
-    if config.retrieval_mode == "es":
-        es_hits = es_client.search_bm25(config.index_name, query, config.top_k)
-        return es_hits, es_hits, [], es_hits
-
-    if milvus_client is None or config.collection_name is None:
-        raise RetrievalRunError("milvus_client and collection_name are required")
-    if vector is None:
-        if embedding_client is None:
-            raise RetrievalRunError("embedding_client is required")
-        vector = embedding_client.embed_texts([query])[0]
-
-    milvus_top_k = (
-        config.top_k
-        if config.retrieval_mode == "milvus"
-        else max(config.hybrid_per_source_topk, config.rrf_path_topk)
-    )
-    milvus_hits = milvus_client.search(config.collection_name, vector, milvus_top_k)
-    enriched_milvus_hits = es_client.enrich_by_chunk_ids(config.index_name, milvus_hits)
-    if config.retrieval_mode == "milvus":
-        return enriched_milvus_hits, [], milvus_hits, enriched_milvus_hits
-
-    es_top_k = max(config.hybrid_per_source_topk, config.rrf_path_topk)
-    es_hits = es_client.search_bm25(config.index_name, query, es_top_k)
-    fused_hits = rrf_fuse(enriched_milvus_hits, es_hits, config.rrf_path_topk)
-    enriched_fused_hits = es_client.enrich_by_chunk_ids(config.index_name, fused_hits)
-    return enriched_fused_hits, es_hits, milvus_hits, enriched_fused_hits
-
-
-def _maybe_rerank(
-    query_text: str,
-    candidates: list[RetrievalHit],
-    config: RetrievalRunConfig,
-    rerank_client: RerankClient | None,
-    trace: dict[str, Any],
-) -> list[RetrievalHit]:
-    if not config.rerank_enabled:
-        return candidates
-    if rerank_client is None:
-        raise RetrievalRunError("rerank_client is required when rerank_enabled=True")
-    ordered = sorted(candidates, key=lambda hit: (-hit.score, hit.chunk_id))
-    head = (
-        ordered[: config.rerank_candidate_cap]
-        if config.rerank_candidate_cap > 0
-        else ordered
-    )
-    tail = ordered[len(head) :]
-    trace["rerank_input"] = [hit.model_dump(mode="json") for hit in head]
-    top_n = config.rerank_cross_path_topk if config.rerank_cross_path_topk > 0 else len(head)
-    reranked = rerank_client.rerank(query_text, head, top_n)
-    trace["rerank_hits"] = [hit.model_dump(mode="json") for hit in reranked]
-    reranked_ids = {hit.chunk_id for hit in reranked}
-    return list(reranked) + [hit for hit in tail if hit.chunk_id not in reranked_ids]
-
-
-def _rank_hits(hits: list[RetrievalHit]) -> list[RetrievalHit]:
-    return [hit.model_copy(update={"rank": rank}) for rank, hit in enumerate(hits, start=1)]
 
 
 def _build_manifest_metadata(config: RetrievalRunConfig) -> dict[str, Any]:

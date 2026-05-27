@@ -4,76 +4,131 @@
 
 ## 1. 任务信息
 
-- 任务名：`artifact type / metadata key registry`
-- 当前分支：`feat/artifact-type-registry`
+- 任务名：`retrieval runner internal split`
+- 当前分支：`feat/retrieval-runner-split`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-27
 - 完成时间：2026-05-27
-- 实现提交 SHA：`9f7b3b44f18f473ce6f83c7112d150b84f78d3a1`
+- 实现提交 SHA：`d1bb287b3e90096db6cb824d99e140856f05eaac`
 - 报告提交 SHA：本报告单独提交后由 `git log -1 --oneline` 确认；提交内容无法自引用自身 SHA。
 
 ## 2. 新增模块和职责
 
-新增：
+新增 retrieval 内部模块：
 
-- `src/eval_platform/artifacts/types.py`
-  - 集中定义 10 个 artifact type 字符串常量。
-  - 定义 `CORPUS_ASSET_STAGE_ORDER`。
-  - 定义 `ALL_ARTIFACT_TYPES`。
-- `src/eval_platform/artifacts/metadata_keys.py`
-  - 集中定义本轮涉及的 manifest metadata key 常量。
-  - 定义 `DEPENDENCY_METADATA_KEYS_BY_ARTIFACT_TYPE`，供 corpus asset reuse 追踪依赖链。
+- `src/eval_platform/retrieval/query_paths.py`
+  - `resolve_query_paths`
+  - `dedupe_queries`
+  - `embed_query_paths`
+- `src/eval_platform/retrieval/recall.py`
+  - `recall_one`
+  - ES / Milvus / hybrid recall path
+  - RRF fusion 调用
+- `src/eval_platform/retrieval/rerank_flow.py`
+  - `maybe_rerank`
+  - `rank_hits`
+  - 说明：已有 `retrieval/rerank.py` 是 HTTP rerank adapter，本轮没有混改 adapter，因此流程 helper 使用 `rerank_flow.py`。
+- `src/eval_platform/retrieval/trace.py`
+  - `new_live_trace`
+  - `append_recall_trace`
+  - `hits_trace`
+  - `build_error_trace`
+- `src/eval_platform/retrieval/replay.py`
+  - `run_retrieval_replay`
+- `src/eval_platform/retrieval/errors.py`
+  - `RetrievalRunError`
+  - `runner.py` 继续导入并保留该 public symbol。
 
-`src/eval_platform/artifacts/__init__.py` 已导出新增 registry 常量。
+## 3. runner.py 保留职责
 
-## 3. 兼容 public import
+`src/eval_platform/retrieval/runner.py` 仍保留：
 
-以下旧入口已保留，且测试确认与新注册表值一致：
+- `RetrievalRunConfig`
+- `RetrievalRunError` public symbol
+- `run_retrieval`
+- runtime dependency validation
+- live run 主循环
+- 单 query 的高层编排 `_retrieve_one_query`
+- manifest metadata 构造
+- manifest dependencies 构造
 
-- `eval_platform.datasets.RAW_DATASET_ARTIFACT_TYPE`
-- `eval_platform.datasets.NORMALIZED_DATASET_ARTIFACT_TYPE`
-- `eval_platform.chunking.CHUNKED_CORPUS_ARTIFACT_TYPE`
-- `eval_platform.embeddings.EMBEDDINGS_ARTIFACT_TYPE`
-- `eval_platform.indexes.ELASTICSEARCH_INDEX_ARTIFACT_TYPE`
-- `eval_platform.indexes.MILVUS_COLLECTION_ARTIFACT_TYPE`
-- `eval_platform.retrieval.RETRIEVAL_RUN_ARTIFACT_TYPE`
-- `eval_platform.metrics.METRICS_RUN_ARTIFACT_TYPE`
-- `eval_platform.benchmark.BENCHMARK_RUN_ARTIFACT_TYPE`
-- `eval_platform.corpus_build.CORPUS_BUILD_ARTIFACT_TYPE`
+未拆分的逻辑和理由：
 
-## 4. 替换范围
+- manifest metadata / dependencies 保留在 `runner.py`，因为它们直接依赖 `RetrievalRunConfig` 的完整字段和 artifact contract。
+- runtime dependency validation 保留在 `runner.py`，因为它是 public run 入口前置检查。
+- `_retrieve_one_query` 保留在 `runner.py` 作为薄编排层，具体 query paths / recall / rerank / trace 已拆出。
 
-已替换：
+## 4. 对外 API
 
-- `src/eval_platform/corpus_assets/`
-  - stage order 和 stage suffix 改为使用 artifact type 注册表。
-  - inventory metadata summary key 改为使用 metadata key 注册表。
-  - planner reuse dependency tracing 改为使用 `DEPENDENCY_METADATA_KEYS_BY_ARTIFACT_TYPE`。
-  - planner ES/Milvus 资源名和依赖 artifact id 输出字段使用同值 metadata key 常量。
-- `src/eval_platform/corpus_build/runner.py`
-  - summary 中 artifact type 和 ES/Milvus resource metadata key 使用注册表常量。
-  - corpus build run artifact type 使用注册表常量。
-- 各 artifact writer 模块中本地定义的 `*_ARTIFACT_TYPE`
-  - dataset raw / normalized
-  - chunked corpus
-  - embeddings
-  - Elasticsearch / Milvus index artifact
-  - retrieval / metrics / benchmark artifact
-  - corpus build runner
-- ES / Milvus / embeddings writer 中与本轮 registry 对应的高风险 dependency/resource metadata key。
+对外 API 不变：
 
-## 5. 未替换范围和理由
+- `eval_platform.retrieval.run_retrieval`
+- `eval_platform.retrieval.RetrievalRunConfig`
+- `eval_platform.retrieval.RetrievalRunError`
+- `eval_platform.retrieval.read_retrieval_run_artifact`
+- `eval_platform.retrieval.write_retrieval_run_artifact`
 
-- retrieval / metrics / benchmark runner 中的 dependency artifact type 引用属于 `TASK.md` 标注的“可以替换但不要过度扩张”，本轮未扩做。
-- 测试中的 JSON 字面量断言保留字符串，用于验证序列化输出字段和值没有变化。
-- 非本轮列出的业务字段名、Pydantic 字段名和用户可见输出字段未做全仓替换，避免改变 schema 语义或扩大重构面。
+未修改：
+
+- `RetrievalRunConfig` 字段名、默认值和校验语义。
+- retrieval artifact JSON schema。
+- manifest metadata 字段和值。
+- manifest dependencies。
+- trace 字段和值。
+- ES / Milvus / hybrid recall 结果顺序。
+- rerank input、rerank hits、final hits 顺序。
+- replay 模式行为。
+- HTTP rerank / embedding client。
+- ES / Milvus adapter 协议。
+
+## 5. 行为一致性证明
+
+开发前在最新 `main` 上运行：
+
+```bash
+pytest tests/retrieval
+```
+
+结果：`51 passed in 0.19s`。
+
+开发后新增并通过模块级测试：
+
+- `tests/retrieval/test_query_paths.py`
+- `tests/retrieval/test_recall.py`
+- `tests/retrieval/test_rerank_flow.py`
+- `tests/retrieval/test_replay.py`
+
+固定 fake-client 合约测试：
+
+- `tests/retrieval/test_runner.py::test_run_retrieval_fixed_live_artifact_can_be_replayed_without_behavior_changes`
+
+该测试覆盖指定配置：
+
+- `retrieval_mode="hybrid"`
+- `top_k=2`
+- `query_limit=1`
+- `rewrite_enabled=True`
+- `sub_queries=2`
+- `rerank_enabled=True`
+- `rerank_candidate_cap=2`
+- `rerank_cross_path_topk=2`
+- `trace_mode="replay"`
+- `execution_mode="live"`
+
+并验证：
+
+- replay records 的 `model_dump(mode="json")` 与 source live records 完全一致。
+- live / replay manifest metadata 关键字段保持预期。
+- live / replay manifest dependencies 保持预期。
+- live / replay complete marker 均存在。
+- replay 不调用 live clients 的行为仍由既有测试覆盖。
 
 ## 6. 测试结果
 
 已运行：
 
 ```bash
-pytest tests/artifacts tests/corpus_assets tests/corpus_build
+pytest tests/retrieval
 pytest
 ruff check .
 mypy .
@@ -81,47 +136,31 @@ mypy .
 
 结果：
 
-- `pytest tests/artifacts tests/corpus_assets tests/corpus_build`
-  - `94 passed in 0.56s`
+- `pytest tests/retrieval`
+  - `64 passed in 0.20s`
 - `pytest`
-  - `573 passed in 1.97s`
+  - `586 passed in 2.23s`
 - `ruff check .`
   - `All checks passed!`
 - `mypy .`
-  - `Success: no issues found in 155 source files`
+  - `Success: no issues found in 165 source files`
 
-## 7. 真实只读一致性校验
+## 7. 外部服务访问
 
-基线在最新 `main` 上生成，分支在 `feat/artifact-type-registry` 上重新生成。三项结构化 JSON 对比均为 `equal=True`。
+- 是否访问真实 S3：`no`
+- 是否访问真实 ES：`no`
+- 是否访问真实 Milvus：`no`
+- 是否访问真实 embedding：`no`
+- 是否访问真实 rerank：`no`
+- 是否访问真实 rewrite：`no`
 
-```text
-inventory:
-  equal=True
-  baseline_sha256=a97825b9588234d1671ec82eb934678bd4aa088f9e334e5e47bf7b117e9822c0
-  branch_sha256=a97825b9588234d1671ec82eb934678bd4aa088f9e334e5e47bf7b117e9822c0
-
-ifir_reuse:
-  equal=True
-  baseline_sha256=d64d753b1184e94b1e44498bc6a9d0ccdc5ceff77a420e51248b78133772c82e
-  branch_sha256=d64d753b1184e94b1e44498bc6a9d0ccdc5ceff77a420e51248b78133772c82e
-
-all_create:
-  equal=True
-  baseline_sha256=11c53cd75e236d983af80f66e79c2797395b168241911c6f7055d7b44e6306da
-  branch_sha256=11c53cd75e236d983af80f66e79c2797395b168241911c6f7055d7b44e6306da
-```
-
-访问真实外部服务情况：
-
-- 仅执行 S3 read-only inventory / dry-run。
-- 未写 S3。
-- 未调用 ES / Milvus / embedding / rerank。
-- 未提交真实 `config.yaml`、密钥或 `/tmp/artifact_registry_*.json` 输出文件。
+本轮只使用本地 fake client 和本地 artifact store 测试。
 
 ## 8. 风险与未决项
 
-- 本轮是字符串常量集中化，不改变 manifest JSON schema、artifact 路径布局或 corpus asset planning 行为。
-- 后续如要继续降低拼写风险，可在独立任务中替换 retrieval / metrics / benchmark runner 的 optional dependency key 引用。
+- `RetrievalRunError` 的定义移入 `retrieval/errors.py`，`runner.py` 和 package public import 仍保留同名入口；常规 import API 不变。
+- `retrieval/rerank.py` 仍专注 HTTP adapter，rerank flow helper 使用 `rerank_flow.py`，避免混改 adapter。
+- 后续如果继续拆 benchmark setting 或 trace schema，应另起任务；本轮未改变 schema 或配置字段。
 
 ## 9. 交付结论
 
