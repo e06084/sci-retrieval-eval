@@ -157,8 +157,10 @@ def test_enrich_by_chunk_ids_preserves_order_and_scores() -> None:
         RetrievalHit(
             chunk_id="chunk-1",
             doc_id="",
+            rank=3,
             score=10.0,
             recall_source="milvus",
+            origin_es_score=1.25,
             origin_milvus_score=0.8,
         ),
         RetrievalHit(chunk_id="chunk-missing", doc_id="", score=9.0, recall_source="milvus"),
@@ -166,14 +168,50 @@ def test_enrich_by_chunk_ids_preserves_order_and_scores() -> None:
 
     enriched = client.enrich_by_chunk_ids("chunks", hits)
 
+    assert transport.calls[0].full_url == "http://es.example/chunks/_mget"
+    assert transport.calls[0].get_method() == "POST"
+    body = _request_body(transport.calls[0])
+    assert body == {
+        "docs": [
+            {
+                "_id": "chunk-1",
+                "_source": [
+                    "chunk_id",
+                    "doc_id",
+                    "title",
+                    "text",
+                    "chunk_index",
+                    "start_offset",
+                    "end_offset",
+                    "metadata",
+                ],
+            },
+            {
+                "_id": "chunk-missing",
+                "_source": [
+                    "chunk_id",
+                    "doc_id",
+                    "title",
+                    "text",
+                    "chunk_index",
+                    "start_offset",
+                    "end_offset",
+                    "metadata",
+                ],
+            },
+        ]
+    }
+    assert "ids" not in body
+    assert "_source" not in body
     assert [hit.chunk_id for hit in enriched] == ["chunk-1", "chunk-missing"]
+    assert enriched[0].rank == 3
     assert enriched[0].score == 10.0
     assert enriched[0].recall_source == "milvus"
+    assert enriched[0].origin_es_score == 1.25
     assert enriched[0].origin_milvus_score == 0.8
     assert enriched[0].doc_id == "doc-1"
     assert enriched[0].metadata["start_offset"] == 10
     assert enriched[1].metadata["enrich_missing"] is True
-    assert _request_body(transport.calls[0])["ids"] == ["chunk-1", "chunk-missing"]
 
 
 def test_http_error_and_invalid_json_raise_without_leaking_password() -> None:
@@ -196,6 +234,26 @@ def test_http_error_and_invalid_json_raise_without_leaking_password() -> None:
     )
     with pytest.raises(ElasticsearchRetrievalAdapterError, match="not valid JSON"):
         invalid_client.search_bm25("chunks", "alpha", 1)
+
+
+def test_enrich_by_chunk_ids_http_error_does_not_leak_password() -> None:
+    client = HTTPElasticsearchRetrievalClient(
+        HTTPElasticsearchRetrievalClientConfig(
+            base_url="http://es.example",
+            username="user",
+            password="super-secret",
+        ),
+        transport=RecordingTransport([(400, {"error": "unknown key [_source]"})]),
+    )
+
+    with pytest.raises(ElasticsearchRetrievalAdapterError) as exc_info:
+        client.enrich_by_chunk_ids(
+            "chunks",
+            [RetrievalHit(chunk_id="chunk-1", doc_id="doc-1", score=1.0)],
+        )
+
+    assert "status 400" in str(exc_info.value)
+    assert "super-secret" not in str(exc_info.value)
 
 
 def test_elasticsearch_retrieval_client_from_config_requires_url() -> None:

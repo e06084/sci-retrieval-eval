@@ -104,7 +104,12 @@ class HTTPElasticsearchRetrievalClient:
     ) -> list[RetrievalHit]:
         if not hits:
             return []
-        body = {"ids": [hit.chunk_id for hit in hits], "_source": _SOURCE_FIELDS}
+        body = {
+            "docs": [
+                {"_id": hit.chunk_id, "_source": _SOURCE_FIELDS}
+                for hit in hits
+            ]
+        }
         payload = self._request_json("POST", f"/{index_name}/_mget", body, "mget")
         docs = payload.get("docs")
         if not isinstance(docs, list):
