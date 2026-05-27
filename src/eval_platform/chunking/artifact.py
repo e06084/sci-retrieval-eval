@@ -15,10 +15,10 @@ from eval_platform.artifacts.manifest import (
     ArtifactManifest,
 )
 from eval_platform.artifacts.store import ArtifactIncompleteError, ArtifactStore
+from eval_platform.artifacts.types import CHUNKED_CORPUS_ARTIFACT_TYPE
 from eval_platform.chunking.jsonl import dump_chunks_jsonl, load_chunks_jsonl
 from eval_platform.chunking.schema import ChunkedCorpus, ChunkerProvenance, ChunkRecord
 
-CHUNKED_CORPUS_ARTIFACT_TYPE = "chunked_corpus"
 CHUNKS_FILENAME = "chunks.jsonl"
 CHUNK_SHARD_DIRNAME = "chunks"
 _SYSTEM_METADATA_FIELDS = {

@@ -14,10 +14,14 @@ from typing import Any, Protocol
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
+from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_INDEX_NAME,
+    METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID,
+)
+from eval_platform.artifacts.types import ELASTICSEARCH_INDEX_ARTIFACT_TYPE
 from eval_platform.chunking import CHUNKED_CORPUS_ARTIFACT_TYPE, ChunkRecord, iter_chunk_shards
 from eval_platform.chunking.progress import ProgressReporter, report_progress
 
-ELASTICSEARCH_INDEX_ARTIFACT_TYPE = "elasticsearch_index"
 DOCUMENT_ID_FIELD = "chunk_id"
 _SENSITIVE_METADATA_KEY_PARTS = (
     "access_key",
@@ -42,7 +46,7 @@ DEFAULT_ELASTICSEARCH_MAPPING: dict[str, Any] = {
             "chunk_index": {"type": "integer"},
             "start_offset": {"type": "integer"},
             "end_offset": {"type": "integer"},
-            "source_chunked_corpus_artifact_id": {"type": "keyword"},
+            METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID: {"type": "keyword"},
             "source_chunk_file": {"type": "keyword"},
             "shard_id": {"type": "keyword"},
             "metadata": {"type": "flattened"},
@@ -313,7 +317,7 @@ def chunk_to_elasticsearch_document(
         "start_offset": chunk.start_offset,
         "end_offset": chunk.end_offset,
         "metadata": dict(chunk.metadata),
-        "source_chunked_corpus_artifact_id": source_artifact_id,
+        METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID: source_artifact_id,
         "source_chunk_file": source_chunk_file,
         "shard_id": shard_id,
     }
@@ -478,8 +482,8 @@ def run_elasticsearch_ingest(
     manifest_metadata.update(_safe_user_metadata(config.metadata))
     manifest_metadata.update(
         {
-            "source_chunked_corpus_artifact_id": config.source_artifact_id,
-            "index_name": config.index_name,
+            METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID: config.source_artifact_id,
+            METADATA_KEY_INDEX_NAME: config.index_name,
             "document_id_field": DOCUMENT_ID_FIELD,
             "bulk_size": config.bulk_size,
             "overwrite_existing": config.overwrite_existing,

@@ -13,13 +13,13 @@ from eval_platform.artifacts import (
     ArtifactManifest,
     ArtifactStore,
 )
+from eval_platform.artifacts.types import RETRIEVAL_RUN_ARTIFACT_TYPE
 from eval_platform.retrieval.jsonl import (
     dump_retrieval_results_jsonl,
     load_retrieval_results_jsonl,
 )
 from eval_platform.retrieval.schema import RetrievalQueryResult
 
-RETRIEVAL_RUN_ARTIFACT_TYPE = "retrieval_run"
 RESULTS_DIR = "results"
 _SYSTEM_METADATA_FIELDS = {
     "stage",

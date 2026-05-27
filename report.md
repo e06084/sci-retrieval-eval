@@ -4,182 +4,127 @@
 
 ## 1. 任务信息
 
-- 任务名：`corpus assets module refactor`
-- 当前分支：`feat/corpus-assets-module`
+- 任务名：`artifact type / metadata key registry`
+- 当前分支：`feat/artifact-type-registry`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-27
 - 完成时间：2026-05-27
+- 实现提交 SHA：`9f7b3b44f18f473ce6f83c7112d150b84f78d3a1`
+- 报告提交 SHA：本报告单独提交后由 `git log -1 --oneline` 确认；提交内容无法自引用自身 SHA。
 
-## 2. 本次改动
-
-将五数据集 corpus/index asset planning 的核心逻辑从脚本 helper 迁移到正式包：
-
-```text
-src/eval_platform/corpus_assets/
-```
-
-新增模块：
-
-- `registry.py`
-  - `DatasetSpec`
-  - `CorpusAssetError`
-  - `TARGET_DATASETS`
-  - `DATASETS_BY_NAME`
-  - `DATASETS_BY_SLUG`
-  - `dataset_specs_for_selection(...)`
-- `naming.py`
-  - `ARTIFACT_STAGE_ORDER`
-  - `STAGE_SUFFIX`
-  - artifact id / ES index / Milvus collection / raw prefix 命名函数
-- `inventory.py`
-  - `inventory_corpus_assets(...)`
-  - manifest metadata summary
-  - dataset/artifact matching
-- `planner.py`
-  - `build_plan_for_datasets(...)`
-  - `--reuse-existing` 自洽 artifact chain 选择
-  - generated/resolved artifact ids
-  - generated/resolved resource names
-- `s3.py`
-  - S3 client / artifact store helper
-  - raw prefix existence check
-  - redacted JSON output
-  - shared script args
-
-新增 package public API：
-
-- `src/eval_platform/corpus_assets/__init__.py`
-
-## 3. Scripts 职责
-
-保留两个真实环境入口：
-
-- `scripts/inventory_real_corpus_assets.py`
-- `scripts/build_real_corpus_assets.py`
-
-它们现在只负责：
-
-- argparse
-- bootstrap `src/` import path
-- load config
-- create S3 client / artifact store
-- call `eval_platform.corpus_assets.*`
-- print redacted JSON
-
-`scripts/corpus_asset_common.py` 已瘦身为兼容 re-export，不再承载核心实现。
-
-## 4. 行为一致性
-
-本轮是结构迁移，不改变 JSON 输出字段名和 dry-run 语义。
-
-保持不变的行为包括：
-
-- artifact id 生成。
-- ES index name / Milvus collection name 生成。
-- raw prefix key / URI 生成。
-- inventory 输出结构。
-- manifest metadata summary 字段。
-- `--reuse-existing` 选择同一条依赖自洽 artifact chain。
-- `generated_artifact_ids` / `resolved_artifact_ids`。
-- `generated_resource_names` / `resolved_resource_names`。
-- reused ES artifact 的 `index_name` 来自 manifest。
-- reused Milvus artifact 的 `collection_name` 来自 manifest。
-- reused ES/Milvus artifact 缺资源名时抛 `CorpusAssetError`。
-- sensitive config / JSON redaction。
-
-## 5. 测试迁移
+## 2. 新增模块和职责
 
 新增：
 
-- `tests/corpus_assets/test_registry_naming.py`
-- `tests/corpus_assets/test_inventory.py`
-- `tests/corpus_assets/test_planner.py`
-- `tests/corpus_assets/test_s3.py`
+- `src/eval_platform/artifacts/types.py`
+  - 集中定义 10 个 artifact type 字符串常量。
+  - 定义 `CORPUS_ASSET_STAGE_ORDER`。
+  - 定义 `ALL_ARTIFACT_TYPES`。
+- `src/eval_platform/artifacts/metadata_keys.py`
+  - 集中定义本轮涉及的 manifest metadata key 常量。
+  - 定义 `DEPENDENCY_METADATA_KEYS_BY_ARTIFACT_TYPE`，供 corpus asset reuse 追踪依赖链。
 
-保留轻量 wrapper 测试：
+`src/eval_platform/artifacts/__init__.py` 已导出新增 registry 常量。
 
-- `tests/scripts/test_inventory_real_corpus_assets.py`
-- `tests/scripts/test_build_real_corpus_assets.py`
+## 3. 兼容 public import
 
-覆盖重点：
+以下旧入口已保留，且测试确认与新注册表值一致：
 
-- dataset name / slug / all selection。
-- unknown dataset 报错。
-- empty `run_id` 报错。
-- artifact id 和 resource name 命名。
-- raw prefix key / URI。
-- inventory manifest summary 和 `_SUCCESS` 识别。
-- generated vs resolved artifact ids。
-- generated vs resolved resource names。
-- reuse-existing dependency-consistent chain resolution。
-- reused ES / Milvus resource name 来自 manifest。
-- reused ES / Milvus 缺资源名明确失败。
-- redaction。
-- 两个 script wrapper 会委托到正式模块。
+- `eval_platform.datasets.RAW_DATASET_ARTIFACT_TYPE`
+- `eval_platform.datasets.NORMALIZED_DATASET_ARTIFACT_TYPE`
+- `eval_platform.chunking.CHUNKED_CORPUS_ARTIFACT_TYPE`
+- `eval_platform.embeddings.EMBEDDINGS_ARTIFACT_TYPE`
+- `eval_platform.indexes.ELASTICSEARCH_INDEX_ARTIFACT_TYPE`
+- `eval_platform.indexes.MILVUS_COLLECTION_ARTIFACT_TYPE`
+- `eval_platform.retrieval.RETRIEVAL_RUN_ARTIFACT_TYPE`
+- `eval_platform.metrics.METRICS_RUN_ARTIFACT_TYPE`
+- `eval_platform.benchmark.BENCHMARK_RUN_ARTIFACT_TYPE`
+- `eval_platform.corpus_build.CORPUS_BUILD_ARTIFACT_TYPE`
 
-## 6. 真实只读检查
+## 4. 替换范围
 
-本轮默认不访问真实 S3，未运行真实只读 inventory / dry-run。
+已替换：
 
-未执行：
+- `src/eval_platform/corpus_assets/`
+  - stage order 和 stage suffix 改为使用 artifact type 注册表。
+  - inventory metadata summary key 改为使用 metadata key 注册表。
+  - planner reuse dependency tracing 改为使用 `DEPENDENCY_METADATA_KEYS_BY_ARTIFACT_TYPE`。
+  - planner ES/Milvus 资源名和依赖 artifact id 输出字段使用同值 metadata key 常量。
+- `src/eval_platform/corpus_build/runner.py`
+  - summary 中 artifact type 和 ES/Milvus resource metadata key 使用注册表常量。
+  - corpus build run artifact type 使用注册表常量。
+- 各 artifact writer 模块中本地定义的 `*_ARTIFACT_TYPE`
+  - dataset raw / normalized
+  - chunked corpus
+  - embeddings
+  - Elasticsearch / Milvus index artifact
+  - retrieval / metrics / benchmark artifact
+  - corpus build runner
+- ES / Milvus / embeddings writer 中与本轮 registry 对应的高风险 dependency/resource metadata key。
 
-- 真实 corpus 构建。
-- 真实 chunking。
-- 真实 embedding。
-- 真实 ES / Milvus 写入。
+## 5. 未替换范围和理由
 
-## 7. 自检结果
+- retrieval / metrics / benchmark runner 中的 dependency artifact type 引用属于 `TASK.md` 标注的“可以替换但不要过度扩张”，本轮未扩做。
+- 测试中的 JSON 字面量断言保留字符串，用于验证序列化输出字段和值没有变化。
+- 非本轮列出的业务字段名、Pydantic 字段名和用户可见输出字段未做全仓替换，避免改变 schema 语义或扩大重构面。
 
-### 7.1 已运行命令
+## 6. 测试结果
+
+已运行：
 
 ```bash
-pytest tests/corpus_assets
-pytest tests/scripts
+pytest tests/artifacts tests/corpus_assets tests/corpus_build
 pytest
 ruff check .
 mypy .
 ```
 
-### 7.2 输出摘要
+结果：
 
-- `pytest tests/corpus_assets`
-  - `18 passed in 0.09s`
-- `pytest tests/scripts`
-  - `3 passed in 0.10s`
+- `pytest tests/artifacts tests/corpus_assets tests/corpus_build`
+  - `94 passed in 0.56s`
 - `pytest`
-  - `564 passed in 1.86s`
+  - `573 passed in 1.97s`
 - `ruff check .`
   - `All checks passed!`
 - `mypy .`
-  - `Success: no issues found in 151 source files`
+  - `Success: no issues found in 155 source files`
 
-## 8. 范围自检
+## 7. 真实只读一致性校验
 
-- 是否实现 `--execute`：`no`
-- 是否真实构建 corpus：`no`
-- 是否真实调用 chunking：`no`
-- 是否真实调用 embedding：`no`
-- 是否真实写 ES / Milvus：`no`
-- 是否修改 retrieval / metrics / benchmark：`no`
-- 是否修改 indexes / chunking / embeddings 业务逻辑：`no`
-- 是否新增正式 CLI：`no`
-- 是否提交真实 config / 密钥 / `.local_artifacts` / inventory 输出：`no`
-- 是否修改 `TASK.md` / `AGENTS.md`：`no`
+基线在最新 `main` 上生成，分支在 `feat/artifact-type-registry` 上重新生成。三项结构化 JSON 对比均为 `equal=True`。
 
-## 9. 风险与未决项
+```text
+inventory:
+  equal=True
+  baseline_sha256=a97825b9588234d1671ec82eb934678bd4aa088f9e334e5e47bf7b117e9822c0
+  branch_sha256=a97825b9588234d1671ec82eb934678bd4aa088f9e334e5e47bf7b117e9822c0
 
-- `scripts/corpus_asset_common.py` 暂时保留兼容 re-export，后续确认无外部引用后可删除。
-- `scripts/build_real_corpus_assets.py --execute` 仍显式拒绝执行；真实构建仍需要后续 runner/client 接入。
-- 本轮没有运行真实 S3 只读检查；行为一致性主要由 fake store / fake client 单元测试覆盖。
+ifir_reuse:
+  equal=True
+  baseline_sha256=d64d753b1184e94b1e44498bc6a9d0ccdc5ceff77a420e51248b78133772c82e
+  branch_sha256=d64d753b1184e94b1e44498bc6a9d0ccdc5ceff77a420e51248b78133772c82e
 
-## 10. 交付结论
+all_create:
+  equal=True
+  baseline_sha256=11c53cd75e236d983af80f66e79c2797395b168241911c6f7055d7b44e6306da
+  branch_sha256=11c53cd75e236d983af80f66e79c2797395b168241911c6f7055d7b44e6306da
+```
+
+访问真实外部服务情况：
+
+- 仅执行 S3 read-only inventory / dry-run。
+- 未写 S3。
+- 未调用 ES / Milvus / embedding / rerank。
+- 未提交真实 `config.yaml`、密钥或 `/tmp/artifact_registry_*.json` 输出文件。
+
+## 8. 风险与未决项
+
+- 本轮是字符串常量集中化，不改变 manifest JSON schema、artifact 路径布局或 corpus asset planning 行为。
+- 后续如要继续降低拼写风险，可在独立任务中替换 retrieval / metrics / benchmark runner 的 optional dependency key 引用。
+
+## 9. 交付结论
 
 - 是否建议验收：`yes`
 - 是否建议合并：`yes`
 - 如果不能合并，卡点是什么：无
-
-## 11. 提交信息
-
-- 是否已提交：`yes`
-- commit subject：`Move corpus asset planning into package`
-- 验收者确认的最终 commit：由验收者用 `git log -1 --oneline` 确认

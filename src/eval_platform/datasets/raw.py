@@ -10,8 +10,7 @@ from pydantic import BaseModel, Field
 
 from eval_platform.artifacts.manifest import ArtifactManifest
 from eval_platform.artifacts.store import ArtifactIncompleteError, ArtifactStore
-
-RAW_DATASET_ARTIFACT_TYPE = "raw_dataset"
+from eval_platform.artifacts.types import RAW_DATASET_ARTIFACT_TYPE
 
 _SYSTEM_METADATA_KEYS = {
     "stage",

@@ -14,10 +14,10 @@ from eval_platform.artifacts import (
     ArtifactManifest,
     ArtifactStore,
 )
+from eval_platform.artifacts.types import METRICS_RUN_ARTIFACT_TYPE
 from eval_platform.metrics.jsonl import dump_query_metrics_jsonl, load_query_metrics_jsonl
 from eval_platform.metrics.schema import MetricsRunData, QueryMetricsRecord
 
-METRICS_RUN_ARTIFACT_TYPE = "metrics_run"
 METRICS_FILENAME = "metrics.json"
 QUERY_METRICS_DIR = "query_metrics"
 _SYSTEM_METADATA_FIELDS = {

@@ -4,6 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
+from eval_platform.artifacts.metadata_keys import (
+    DEPENDENCY_METADATA_KEYS_BY_ARTIFACT_TYPE,
+    METADATA_KEY_CHUNKED_CORPUS_ARTIFACT_ID,
+    METADATA_KEY_COLLECTION_NAME,
+    METADATA_KEY_EMBEDDINGS_ARTIFACT_ID,
+    METADATA_KEY_INDEX_NAME,
+)
+from eval_platform.artifacts.types import (
+    CHUNKED_CORPUS_ARTIFACT_TYPE,
+    ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+    EMBEDDINGS_ARTIFACT_TYPE,
+    MILVUS_COLLECTION_ARTIFACT_TYPE,
+    NORMALIZED_DATASET_ARTIFACT_TYPE,
+    RAW_DATASET_ARTIFACT_TYPE,
+)
 from eval_platform.corpus_assets.naming import (
     ARTIFACT_STAGE_ORDER,
     artifact_ids_for_dataset,
@@ -13,16 +28,6 @@ from eval_platform.corpus_assets.naming import (
     s3_uri,
 )
 from eval_platform.corpus_assets.registry import CorpusAssetError, DatasetSpec
-
-_DEPENDENCY_METADATA_KEYS = {
-    "raw_dataset": ("raw_dataset_artifact_id",),
-    "normalized_dataset": ("source_normalized_dataset_artifact_id",),
-    "chunked_corpus": (
-        "source_chunked_corpus_artifact_id",
-        "chunked_corpus_artifact_id",
-    ),
-    "embeddings": ("source_embeddings_artifact_id", "embeddings_artifact_id"),
-}
 
 
 def build_plan_for_datasets(
@@ -53,8 +58,8 @@ def build_plan_for_datasets(
         )
         resolved_artifact_ids: dict[str, str] = {}
         generated_resource_names = {
-            "elasticsearch_index": index_name_for_dataset(spec, run_id),
-            "milvus_collection": collection_name_for_dataset(spec, run_id),
+            ELASTICSEARCH_INDEX_ARTIFACT_TYPE: index_name_for_dataset(spec, run_id),
+            MILVUS_COLLECTION_ARTIFACT_TYPE: collection_name_for_dataset(spec, run_id),
         }
         resolved_resource_names: dict[str, str] = {}
         steps: list[dict[str, Any]] = []
@@ -82,50 +87,56 @@ def build_plan_for_datasets(
             }
             if source_artifact_id is not None:
                 step["source_artifact_id"] = source_artifact_id
-            if artifact_type == "raw_dataset":
+            if artifact_type == RAW_DATASET_ARTIFACT_TYPE:
                 step["raw_source_uri"] = raw_prefix_uri(bucket, raw_prefix, spec)
-            if artifact_type == "elasticsearch_index":
+            if artifact_type == ELASTICSEARCH_INDEX_ARTIFACT_TYPE:
                 if reused_record is not None:
-                    step["index_name"] = _required_metadata_value(
+                    step[METADATA_KEY_INDEX_NAME] = _required_metadata_value(
                         reused_record,
-                        "index_name",
+                        METADATA_KEY_INDEX_NAME,
                     )
                     step["source_artifact_id"] = _dependency_id(
                         reused_record,
-                        "chunked_corpus",
+                        CHUNKED_CORPUS_ARTIFACT_TYPE,
                     )
                 else:
-                    step["index_name"] = generated_resource_names[
-                        "elasticsearch_index"
+                    step[METADATA_KEY_INDEX_NAME] = generated_resource_names[
+                        ELASTICSEARCH_INDEX_ARTIFACT_TYPE
                     ]
                     step["source_artifact_id"] = resolved_artifact_ids[
-                        "chunked_corpus"
+                        CHUNKED_CORPUS_ARTIFACT_TYPE
                     ]
-                resolved_resource_names["elasticsearch_index"] = step["index_name"]
-            if artifact_type == "milvus_collection":
+                resolved_resource_names[ELASTICSEARCH_INDEX_ARTIFACT_TYPE] = step[
+                    METADATA_KEY_INDEX_NAME
+                ]
+            if artifact_type == MILVUS_COLLECTION_ARTIFACT_TYPE:
                 step.pop("source_artifact_id", None)
                 if reused_record is not None:
-                    step["collection_name"] = _required_metadata_value(
+                    step[METADATA_KEY_COLLECTION_NAME] = _required_metadata_value(
                         reused_record,
-                        "collection_name",
+                        METADATA_KEY_COLLECTION_NAME,
                     )
-                    step["chunked_corpus_artifact_id"] = _dependency_id(
+                    step[METADATA_KEY_CHUNKED_CORPUS_ARTIFACT_ID] = _dependency_id(
                         reused_record,
-                        "chunked_corpus",
+                        CHUNKED_CORPUS_ARTIFACT_TYPE,
                     )
-                    step["embeddings_artifact_id"] = _dependency_id(
+                    step[METADATA_KEY_EMBEDDINGS_ARTIFACT_ID] = _dependency_id(
                         reused_record,
-                        "embeddings",
+                        EMBEDDINGS_ARTIFACT_TYPE,
                     )
                 else:
-                    step["chunked_corpus_artifact_id"] = resolved_artifact_ids[
-                        "chunked_corpus"
+                    step[METADATA_KEY_CHUNKED_CORPUS_ARTIFACT_ID] = resolved_artifact_ids[
+                        CHUNKED_CORPUS_ARTIFACT_TYPE
                     ]
-                    step["embeddings_artifact_id"] = resolved_artifact_ids["embeddings"]
-                    step["collection_name"] = generated_resource_names[
-                        "milvus_collection"
+                    step[METADATA_KEY_EMBEDDINGS_ARTIFACT_ID] = resolved_artifact_ids[
+                        EMBEDDINGS_ARTIFACT_TYPE
                     ]
-                resolved_resource_names["milvus_collection"] = step["collection_name"]
+                    step[METADATA_KEY_COLLECTION_NAME] = generated_resource_names[
+                        MILVUS_COLLECTION_ARTIFACT_TYPE
+                    ]
+                resolved_resource_names[MILVUS_COLLECTION_ARTIFACT_TYPE] = step[
+                    METADATA_KEY_COLLECTION_NAME
+                ]
             steps.append(step)
             source_artifact_id = artifact_id
 
@@ -137,8 +148,12 @@ def build_plan_for_datasets(
             "resolved_artifact_ids": resolved_artifact_ids,
             "generated_resource_names": generated_resource_names,
             "resolved_resource_names": resolved_resource_names,
-            "elasticsearch_index_name": resolved_resource_names["elasticsearch_index"],
-            "milvus_collection_name": resolved_resource_names["milvus_collection"],
+            "elasticsearch_index_name": resolved_resource_names[
+                ELASTICSEARCH_INDEX_ARTIFACT_TYPE
+            ],
+            "milvus_collection_name": resolved_resource_names[
+                MILVUS_COLLECTION_ARTIFACT_TYPE
+            ],
             "steps": steps,
         }
 
@@ -186,58 +201,58 @@ def _resolve_reusable_artifact_chain(
 ) -> dict[str, str]:
     """Resolve one dependency-consistent reusable artifact chain."""
 
-    for record in records_by_id.get("milvus_collection", {}).values():
+    for record in records_by_id.get(MILVUS_COLLECTION_ARTIFACT_TYPE, {}).values():
         chain = _trace_milvus_chain(records_by_id, str(record["artifact_id"]))
         if chain is None:
             continue
         matching_es_id = _find_dependent_record_id(
             records_by_id,
-            "elasticsearch_index",
-            "chunked_corpus",
-            chain["chunked_corpus"],
+            ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+            CHUNKED_CORPUS_ARTIFACT_TYPE,
+            chain[CHUNKED_CORPUS_ARTIFACT_TYPE],
         )
         if matching_es_id is not None:
-            chain["elasticsearch_index"] = matching_es_id
+            chain[ELASTICSEARCH_INDEX_ARTIFACT_TYPE] = matching_es_id
         return chain
 
-    for record in records_by_id.get("elasticsearch_index", {}).values():
+    for record in records_by_id.get(ELASTICSEARCH_INDEX_ARTIFACT_TYPE, {}).values():
         chain = _trace_elasticsearch_chain(records_by_id, str(record["artifact_id"]))
         if chain is None:
             continue
         matching_embedding_id = _find_dependent_record_id(
             records_by_id,
-            "embeddings",
-            "chunked_corpus",
-            chain["chunked_corpus"],
+            EMBEDDINGS_ARTIFACT_TYPE,
+            CHUNKED_CORPUS_ARTIFACT_TYPE,
+            chain[CHUNKED_CORPUS_ARTIFACT_TYPE],
         )
         if matching_embedding_id is not None:
-            chain["embeddings"] = matching_embedding_id
+            chain[EMBEDDINGS_ARTIFACT_TYPE] = matching_embedding_id
             matching_milvus_id = _find_milvus_record_id(
                 records_by_id,
-                chunked_corpus_id=chain["chunked_corpus"],
+                chunked_corpus_id=chain[CHUNKED_CORPUS_ARTIFACT_TYPE],
                 embeddings_id=matching_embedding_id,
             )
             if matching_milvus_id is not None:
-                chain["milvus_collection"] = matching_milvus_id
+                chain[MILVUS_COLLECTION_ARTIFACT_TYPE] = matching_milvus_id
         return chain
 
-    for record in records_by_id.get("embeddings", {}).values():
+    for record in records_by_id.get(EMBEDDINGS_ARTIFACT_TYPE, {}).values():
         chain = _trace_embedding_chain(records_by_id, str(record["artifact_id"]))
         if chain is not None:
             return chain
 
-    for record in records_by_id.get("chunked_corpus", {}).values():
+    for record in records_by_id.get(CHUNKED_CORPUS_ARTIFACT_TYPE, {}).values():
         chain = _trace_chunked_chain(records_by_id, str(record["artifact_id"]))
         if chain is not None:
             return chain
 
-    for record in records_by_id.get("normalized_dataset", {}).values():
+    for record in records_by_id.get(NORMALIZED_DATASET_ARTIFACT_TYPE, {}).values():
         chain = _trace_normalized_chain(records_by_id, str(record["artifact_id"]))
         if chain is not None:
             return chain
 
-    for record in records_by_id.get("raw_dataset", {}).values():
-        return {"raw_dataset": str(record["artifact_id"])}
+    for record in records_by_id.get(RAW_DATASET_ARTIFACT_TYPE, {}).values():
+        return {RAW_DATASET_ARTIFACT_TYPE: str(record["artifact_id"])}
 
     return {}
 
@@ -246,23 +261,23 @@ def _trace_milvus_chain(
     records_by_id: dict[str, dict[str, dict[str, Any]]],
     artifact_id: str,
 ) -> dict[str, str] | None:
-    record = records_by_id.get("milvus_collection", {}).get(artifact_id)
+    record = records_by_id.get(MILVUS_COLLECTION_ARTIFACT_TYPE, {}).get(artifact_id)
     if record is None:
         return None
-    chunked_corpus_id = _dependency_id(record, "chunked_corpus")
-    embeddings_id = _dependency_id(record, "embeddings")
+    chunked_corpus_id = _dependency_id(record, CHUNKED_CORPUS_ARTIFACT_TYPE)
+    embeddings_id = _dependency_id(record, EMBEDDINGS_ARTIFACT_TYPE)
     if chunked_corpus_id is None or embeddings_id is None:
         return None
     chunk_chain = _trace_chunked_chain(records_by_id, chunked_corpus_id)
     embedding_chain = _trace_embedding_chain(records_by_id, embeddings_id)
     if chunk_chain is None or embedding_chain is None:
         return None
-    if embedding_chain["chunked_corpus"] != chunked_corpus_id:
+    if embedding_chain[CHUNKED_CORPUS_ARTIFACT_TYPE] != chunked_corpus_id:
         return None
     return {
         **chunk_chain,
-        "embeddings": embeddings_id,
-        "milvus_collection": artifact_id,
+        EMBEDDINGS_ARTIFACT_TYPE: embeddings_id,
+        MILVUS_COLLECTION_ARTIFACT_TYPE: artifact_id,
     }
 
 
@@ -270,63 +285,66 @@ def _trace_elasticsearch_chain(
     records_by_id: dict[str, dict[str, dict[str, Any]]],
     artifact_id: str,
 ) -> dict[str, str] | None:
-    record = records_by_id.get("elasticsearch_index", {}).get(artifact_id)
+    record = records_by_id.get(ELASTICSEARCH_INDEX_ARTIFACT_TYPE, {}).get(artifact_id)
     if record is None:
         return None
-    chunked_corpus_id = _dependency_id(record, "chunked_corpus")
+    chunked_corpus_id = _dependency_id(record, CHUNKED_CORPUS_ARTIFACT_TYPE)
     if chunked_corpus_id is None:
         return None
     chunk_chain = _trace_chunked_chain(records_by_id, chunked_corpus_id)
     if chunk_chain is None:
         return None
-    return {**chunk_chain, "elasticsearch_index": artifact_id}
+    return {**chunk_chain, ELASTICSEARCH_INDEX_ARTIFACT_TYPE: artifact_id}
 
 
 def _trace_embedding_chain(
     records_by_id: dict[str, dict[str, dict[str, Any]]],
     artifact_id: str,
 ) -> dict[str, str] | None:
-    record = records_by_id.get("embeddings", {}).get(artifact_id)
+    record = records_by_id.get(EMBEDDINGS_ARTIFACT_TYPE, {}).get(artifact_id)
     if record is None:
         return None
-    chunked_corpus_id = _dependency_id(record, "chunked_corpus")
+    chunked_corpus_id = _dependency_id(record, CHUNKED_CORPUS_ARTIFACT_TYPE)
     if chunked_corpus_id is None:
         return None
     chunk_chain = _trace_chunked_chain(records_by_id, chunked_corpus_id)
     if chunk_chain is None:
         return None
-    return {**chunk_chain, "embeddings": artifact_id}
+    return {**chunk_chain, EMBEDDINGS_ARTIFACT_TYPE: artifact_id}
 
 
 def _trace_chunked_chain(
     records_by_id: dict[str, dict[str, dict[str, Any]]],
     artifact_id: str,
 ) -> dict[str, str] | None:
-    record = records_by_id.get("chunked_corpus", {}).get(artifact_id)
+    record = records_by_id.get(CHUNKED_CORPUS_ARTIFACT_TYPE, {}).get(artifact_id)
     if record is None:
         return None
-    normalized_id = _dependency_id(record, "normalized_dataset")
+    normalized_id = _dependency_id(record, NORMALIZED_DATASET_ARTIFACT_TYPE)
     if normalized_id is None:
         return None
     normalized_chain = _trace_normalized_chain(records_by_id, normalized_id)
     if normalized_chain is None:
         return None
-    return {**normalized_chain, "chunked_corpus": artifact_id}
+    return {**normalized_chain, CHUNKED_CORPUS_ARTIFACT_TYPE: artifact_id}
 
 
 def _trace_normalized_chain(
     records_by_id: dict[str, dict[str, dict[str, Any]]],
     artifact_id: str,
 ) -> dict[str, str] | None:
-    record = records_by_id.get("normalized_dataset", {}).get(artifact_id)
+    record = records_by_id.get(NORMALIZED_DATASET_ARTIFACT_TYPE, {}).get(artifact_id)
     if record is None:
         return None
-    raw_id = _dependency_id(record, "raw_dataset")
+    raw_id = _dependency_id(record, RAW_DATASET_ARTIFACT_TYPE)
     if raw_id is None:
         return None
-    if raw_id not in records_by_id.get("raw_dataset", {}):
+    if raw_id not in records_by_id.get(RAW_DATASET_ARTIFACT_TYPE, {}):
         return None
-    return {"raw_dataset": raw_id, "normalized_dataset": artifact_id}
+    return {
+        RAW_DATASET_ARTIFACT_TYPE: raw_id,
+        NORMALIZED_DATASET_ARTIFACT_TYPE: artifact_id,
+    }
 
 
 def _find_dependent_record_id(
@@ -347,10 +365,13 @@ def _find_milvus_record_id(
     chunked_corpus_id: str,
     embeddings_id: str,
 ) -> str | None:
-    for artifact_id, record in records_by_id.get("milvus_collection", {}).items():
+    for artifact_id, record in records_by_id.get(
+        MILVUS_COLLECTION_ARTIFACT_TYPE,
+        {},
+    ).items():
         if (
-            _dependency_id(record, "chunked_corpus") == chunked_corpus_id
-            and _dependency_id(record, "embeddings") == embeddings_id
+            _dependency_id(record, CHUNKED_CORPUS_ARTIFACT_TYPE) == chunked_corpus_id
+            and _dependency_id(record, EMBEDDINGS_ARTIFACT_TYPE) == embeddings_id
         ):
             return artifact_id
     return None
@@ -362,7 +383,7 @@ def _dependency_id(record: dict[str, Any], artifact_type: str) -> str | None:
         if dependency.get("artifact_type") == artifact_type:
             artifact_id = dependency.get("artifact_id")
             return str(artifact_id) if artifact_id else None
-    for key in _DEPENDENCY_METADATA_KEYS.get(artifact_type, ()):
+    for key in DEPENDENCY_METADATA_KEYS_BY_ARTIFACT_TYPE.get(artifact_type, ()):
         artifact_id = metadata.get(key)
         if artifact_id:
             return str(artifact_id)

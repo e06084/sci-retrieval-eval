@@ -6,6 +6,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from eval_platform.artifacts import ArtifactManifest, ArtifactStore
+from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_CHUNKED_CORPUS_ARTIFACT_ID,
+    METADATA_KEY_COLLECTION_NAME,
+    METADATA_KEY_EMBEDDINGS_ARTIFACT_ID,
+    METADATA_KEY_INDEX_NAME,
+    METADATA_KEY_RAW_DATASET_ARTIFACT_ID,
+    METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID,
+    METADATA_KEY_SOURCE_EMBEDDINGS_ARTIFACT_ID,
+    METADATA_KEY_SOURCE_NORMALIZED_DATASET_ARTIFACT_ID,
+)
 from eval_platform.artifacts.store import SUCCESS_MARKER
 from eval_platform.corpus_assets.naming import (
     ARTIFACT_STAGE_ORDER,
@@ -30,14 +40,14 @@ _MANIFEST_SUMMARY_KEYS = {
     "unique_doc_count",
     "embedding_dim",
     "source_artifact_id",
-    "raw_dataset_artifact_id",
-    "source_normalized_dataset_artifact_id",
-    "source_chunked_corpus_artifact_id",
-    "source_embeddings_artifact_id",
-    "chunked_corpus_artifact_id",
-    "embeddings_artifact_id",
-    "index_name",
-    "collection_name",
+    METADATA_KEY_RAW_DATASET_ARTIFACT_ID,
+    METADATA_KEY_SOURCE_NORMALIZED_DATASET_ARTIFACT_ID,
+    METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID,
+    METADATA_KEY_SOURCE_EMBEDDINGS_ARTIFACT_ID,
+    METADATA_KEY_CHUNKED_CORPUS_ARTIFACT_ID,
+    METADATA_KEY_EMBEDDINGS_ARTIFACT_ID,
+    METADATA_KEY_INDEX_NAME,
+    METADATA_KEY_COLLECTION_NAME,
     "indexed_count",
     "inserted_count",
     "failed_count",

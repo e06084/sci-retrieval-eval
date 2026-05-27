@@ -5,6 +5,7 @@ from typing import Any
 
 from eval_platform.artifacts.manifest import ArtifactDependency, ArtifactFile, ArtifactManifest
 from eval_platform.artifacts.store import ArtifactIncompleteError, ArtifactStore
+from eval_platform.artifacts.types import NORMALIZED_DATASET_ARTIFACT_TYPE
 from eval_platform.datasets.jsonl import dump_jsonl, load_jsonl
 from eval_platform.datasets.schema import (
     CorpusRecord,
@@ -13,7 +14,6 @@ from eval_platform.datasets.schema import (
     QueryRecord,
 )
 
-NORMALIZED_DATASET_ARTIFACT_TYPE = "normalized_dataset"
 CORPUS_FILENAME = "corpus.jsonl"
 QUERIES_FILENAME = "queries.jsonl"
 QRELS_FILENAME = "qrels.jsonl"

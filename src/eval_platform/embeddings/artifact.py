@@ -16,6 +16,8 @@ from eval_platform.artifacts import (
     ArtifactManifest,
     ArtifactStore,
 )
+from eval_platform.artifacts.metadata_keys import METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID
+from eval_platform.artifacts.types import EMBEDDINGS_ARTIFACT_TYPE
 from eval_platform.embeddings.jsonl import (
     VECTOR_DTYPE,
     VECTOR_ENCODING,
@@ -24,7 +26,6 @@ from eval_platform.embeddings.jsonl import (
 )
 from eval_platform.embeddings.schema import EmbeddedCorpus, EmbeddingProvenance, EmbeddingRecord
 
-EMBEDDINGS_ARTIFACT_TYPE = "embeddings"
 EMBEDDINGS_FILENAME = "embeddings.jsonl"
 _SYSTEM_METADATA_FIELDS = {
     "embedding_count",
@@ -34,7 +35,7 @@ _SYSTEM_METADATA_FIELDS = {
     "embedding_dtype",
     "vector_encoding",
     "provenance",
-    "source_chunked_corpus_artifact_id",
+    METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID,
     "alignment_key",
     "alignment_order",
     "sharding",
@@ -221,7 +222,7 @@ def write_embedding_shards_artifact(
             "embedding_dtype": VECTOR_DTYPE,
             "vector_encoding": VECTOR_ENCODING,
             "provenance": provenance.model_dump(mode="json"),
-            "source_chunked_corpus_artifact_id": source_artifact_id,
+            METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID: source_artifact_id,
             "alignment_key": "chunk_id",
             "alignment_order": "source_chunk_order",
             "sharding": {

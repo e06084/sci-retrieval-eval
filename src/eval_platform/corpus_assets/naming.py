@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
+from eval_platform.artifacts.types import (
+    CHUNKED_CORPUS_ARTIFACT_TYPE,
+    CORPUS_ASSET_STAGE_ORDER,
+    ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+    EMBEDDINGS_ARTIFACT_TYPE,
+    MILVUS_COLLECTION_ARTIFACT_TYPE,
+    NORMALIZED_DATASET_ARTIFACT_TYPE,
+    RAW_DATASET_ARTIFACT_TYPE,
+)
 from eval_platform.corpus_assets.registry import CorpusAssetError, DatasetSpec
 
-ARTIFACT_STAGE_ORDER = [
-    "raw_dataset",
-    "normalized_dataset",
-    "chunked_corpus",
-    "embeddings",
-    "elasticsearch_index",
-    "milvus_collection",
-]
+ARTIFACT_STAGE_ORDER = CORPUS_ASSET_STAGE_ORDER
 
 STAGE_SUFFIX = {
-    "raw_dataset": "raw",
-    "normalized_dataset": "normalized",
-    "chunked_corpus": "chunks",
-    "embeddings": "embeddings",
-    "elasticsearch_index": "es_index",
-    "milvus_collection": "milvus_collection",
+    RAW_DATASET_ARTIFACT_TYPE: "raw",
+    NORMALIZED_DATASET_ARTIFACT_TYPE: "normalized",
+    CHUNKED_CORPUS_ARTIFACT_TYPE: "chunks",
+    EMBEDDINGS_ARTIFACT_TYPE: "embeddings",
+    ELASTICSEARCH_INDEX_ARTIFACT_TYPE: "es_index",
+    MILVUS_COLLECTION_ARTIFACT_TYPE: "milvus_collection",
 }
 
 

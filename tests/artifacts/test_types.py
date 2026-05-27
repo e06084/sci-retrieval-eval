@@ -1,0 +1,125 @@
+"""Tests for centralized artifact type constants."""
+
+from __future__ import annotations
+
+from eval_platform import benchmark, chunking, corpus_build, embeddings, indexes, metrics, retrieval
+from eval_platform import datasets as datasets_pkg
+from eval_platform.artifacts import ALL_ARTIFACT_TYPES as EXPORTED_ALL_ARTIFACT_TYPES
+from eval_platform.artifacts import (
+    BENCHMARK_RUN_ARTIFACT_TYPE as EXPORTED_BENCHMARK_RUN_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    CHUNKED_CORPUS_ARTIFACT_TYPE as EXPORTED_CHUNKED_CORPUS_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    CORPUS_ASSET_STAGE_ORDER as EXPORTED_CORPUS_ASSET_STAGE_ORDER,
+)
+from eval_platform.artifacts import (
+    CORPUS_BUILD_ARTIFACT_TYPE as EXPORTED_CORPUS_BUILD_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    ELASTICSEARCH_INDEX_ARTIFACT_TYPE as EXPORTED_ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    EMBEDDINGS_ARTIFACT_TYPE as EXPORTED_EMBEDDINGS_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    METRICS_RUN_ARTIFACT_TYPE as EXPORTED_METRICS_RUN_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    MILVUS_COLLECTION_ARTIFACT_TYPE as EXPORTED_MILVUS_COLLECTION_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    NORMALIZED_DATASET_ARTIFACT_TYPE as EXPORTED_NORMALIZED_DATASET_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    RAW_DATASET_ARTIFACT_TYPE as EXPORTED_RAW_DATASET_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
+    RETRIEVAL_RUN_ARTIFACT_TYPE as EXPORTED_RETRIEVAL_RUN_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts.types import (
+    ALL_ARTIFACT_TYPES,
+    BENCHMARK_RUN_ARTIFACT_TYPE,
+    CHUNKED_CORPUS_ARTIFACT_TYPE,
+    CORPUS_ASSET_STAGE_ORDER,
+    CORPUS_BUILD_ARTIFACT_TYPE,
+    ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+    EMBEDDINGS_ARTIFACT_TYPE,
+    METRICS_RUN_ARTIFACT_TYPE,
+    MILVUS_COLLECTION_ARTIFACT_TYPE,
+    NORMALIZED_DATASET_ARTIFACT_TYPE,
+    RAW_DATASET_ARTIFACT_TYPE,
+    RETRIEVAL_RUN_ARTIFACT_TYPE,
+)
+
+
+def test_corpus_asset_stage_order_is_stable() -> None:
+    assert CORPUS_ASSET_STAGE_ORDER == [
+        "raw_dataset",
+        "normalized_dataset",
+        "chunked_corpus",
+        "embeddings",
+        "elasticsearch_index",
+        "milvus_collection",
+    ]
+
+
+def test_all_artifact_types_are_complete_and_unique() -> None:
+    assert ALL_ARTIFACT_TYPES == [
+        RAW_DATASET_ARTIFACT_TYPE,
+        NORMALIZED_DATASET_ARTIFACT_TYPE,
+        CHUNKED_CORPUS_ARTIFACT_TYPE,
+        EMBEDDINGS_ARTIFACT_TYPE,
+        ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+        MILVUS_COLLECTION_ARTIFACT_TYPE,
+        RETRIEVAL_RUN_ARTIFACT_TYPE,
+        METRICS_RUN_ARTIFACT_TYPE,
+        BENCHMARK_RUN_ARTIFACT_TYPE,
+        CORPUS_BUILD_ARTIFACT_TYPE,
+    ]
+    assert len(ALL_ARTIFACT_TYPES) == 10
+    assert len(set(ALL_ARTIFACT_TYPES)) == len(ALL_ARTIFACT_TYPES)
+
+
+def test_legacy_public_artifact_type_imports_match_registry() -> None:
+    assert datasets_pkg.RAW_DATASET_ARTIFACT_TYPE == RAW_DATASET_ARTIFACT_TYPE
+    assert (
+        datasets_pkg.NORMALIZED_DATASET_ARTIFACT_TYPE
+        == NORMALIZED_DATASET_ARTIFACT_TYPE
+    )
+    assert chunking.CHUNKED_CORPUS_ARTIFACT_TYPE == CHUNKED_CORPUS_ARTIFACT_TYPE
+    assert embeddings.EMBEDDINGS_ARTIFACT_TYPE == EMBEDDINGS_ARTIFACT_TYPE
+    assert (
+        indexes.ELASTICSEARCH_INDEX_ARTIFACT_TYPE
+        == ELASTICSEARCH_INDEX_ARTIFACT_TYPE
+    )
+    assert indexes.MILVUS_COLLECTION_ARTIFACT_TYPE == MILVUS_COLLECTION_ARTIFACT_TYPE
+    assert retrieval.RETRIEVAL_RUN_ARTIFACT_TYPE == RETRIEVAL_RUN_ARTIFACT_TYPE
+    assert metrics.METRICS_RUN_ARTIFACT_TYPE == METRICS_RUN_ARTIFACT_TYPE
+    assert benchmark.BENCHMARK_RUN_ARTIFACT_TYPE == BENCHMARK_RUN_ARTIFACT_TYPE
+    assert corpus_build.CORPUS_BUILD_ARTIFACT_TYPE == CORPUS_BUILD_ARTIFACT_TYPE
+
+
+def test_artifacts_package_exports_artifact_type_registry() -> None:
+    assert EXPORTED_ALL_ARTIFACT_TYPES == ALL_ARTIFACT_TYPES
+    assert EXPORTED_CORPUS_ASSET_STAGE_ORDER == CORPUS_ASSET_STAGE_ORDER
+    assert EXPORTED_RAW_DATASET_ARTIFACT_TYPE == RAW_DATASET_ARTIFACT_TYPE
+    assert (
+        EXPORTED_NORMALIZED_DATASET_ARTIFACT_TYPE
+        == NORMALIZED_DATASET_ARTIFACT_TYPE
+    )
+    assert EXPORTED_CHUNKED_CORPUS_ARTIFACT_TYPE == CHUNKED_CORPUS_ARTIFACT_TYPE
+    assert EXPORTED_EMBEDDINGS_ARTIFACT_TYPE == EMBEDDINGS_ARTIFACT_TYPE
+    assert (
+        EXPORTED_ELASTICSEARCH_INDEX_ARTIFACT_TYPE
+        == ELASTICSEARCH_INDEX_ARTIFACT_TYPE
+    )
+    assert (
+        EXPORTED_MILVUS_COLLECTION_ARTIFACT_TYPE
+        == MILVUS_COLLECTION_ARTIFACT_TYPE
+    )
+    assert EXPORTED_RETRIEVAL_RUN_ARTIFACT_TYPE == RETRIEVAL_RUN_ARTIFACT_TYPE
+    assert EXPORTED_METRICS_RUN_ARTIFACT_TYPE == METRICS_RUN_ARTIFACT_TYPE
+    assert EXPORTED_BENCHMARK_RUN_ARTIFACT_TYPE == BENCHMARK_RUN_ARTIFACT_TYPE
+    assert EXPORTED_CORPUS_BUILD_ARTIFACT_TYPE == CORPUS_BUILD_ARTIFACT_TYPE

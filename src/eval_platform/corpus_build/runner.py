@@ -11,8 +11,20 @@ from urllib.parse import unquote, urlparse
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
-from eval_platform.chunking import (
+from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_COLLECTION_NAME,
+    METADATA_KEY_INDEX_NAME,
+)
+from eval_platform.artifacts.types import (
     CHUNKED_CORPUS_ARTIFACT_TYPE,
+    CORPUS_BUILD_ARTIFACT_TYPE,
+    ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+    EMBEDDINGS_ARTIFACT_TYPE,
+    MILVUS_COLLECTION_ARTIFACT_TYPE,
+    NORMALIZED_DATASET_ARTIFACT_TYPE,
+    RAW_DATASET_ARTIFACT_TYPE,
+)
+from eval_platform.chunking import (
     ChunkingRunConfig,
     ExternalChunker,
     ProgressReporter,
@@ -20,8 +32,6 @@ from eval_platform.chunking import (
 )
 from eval_platform.chunking.progress import report_progress
 from eval_platform.datasets import (
-    NORMALIZED_DATASET_ARTIFACT_TYPE,
-    RAW_DATASET_ARTIFACT_TYPE,
     RawFileOpener,
     RawToNormalizedConfig,
     import_raw_dataset_from_local_dir,
@@ -30,14 +40,11 @@ from eval_platform.datasets import (
 )
 from eval_platform.datasets.raw_normalize import SUPPORTED_RAW_NORMALIZER_DATASET_NAMES
 from eval_platform.embeddings import (
-    EMBEDDINGS_ARTIFACT_TYPE,
     EmbeddingClient,
     EmbeddingRunConfig,
     run_embedding,
 )
 from eval_platform.indexes import (
-    ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
-    MILVUS_COLLECTION_ARTIFACT_TYPE,
     ElasticsearchClientProtocol,
     ElasticsearchIngestConfig,
     MilvusClientProtocol,
@@ -46,7 +53,6 @@ from eval_platform.indexes import (
     run_milvus_ingest,
 )
 
-CORPUS_BUILD_ARTIFACT_TYPE = "corpus_build"
 _SENSITIVE_METADATA_KEY_PARTS = (
     "access_key",
     "api_key",
@@ -305,14 +311,14 @@ def _metadata_summary(manifest: ArtifactManifest) -> dict[str, Any]:
             "vector_encoding",
         },
         ELASTICSEARCH_INDEX_ARTIFACT_TYPE: {
-            "index_name",
+            METADATA_KEY_INDEX_NAME,
             "mapping_sha256",
             "indexed_count",
             "failed_count",
             "verified_document_count",
         },
         MILVUS_COLLECTION_ARTIFACT_TYPE: {
-            "collection_name",
+            METADATA_KEY_COLLECTION_NAME,
             "schema_sha256",
             "inserted_count",
             "failed_count",
@@ -364,7 +370,7 @@ def _report_stage_start(
 ) -> None:
     report_progress(
         progress_reporter,
-        stage="corpus_build",
+        stage=CORPUS_BUILD_ARTIFACT_TYPE,
         current=current,
         total=total,
         message=f"Starting corpus build stage: {stage_name}",
@@ -382,7 +388,7 @@ def _report_stage_done(
 ) -> None:
     report_progress(
         progress_reporter,
-        stage="corpus_build",
+        stage=CORPUS_BUILD_ARTIFACT_TYPE,
         current=current,
         total=total,
         message=f"Completed corpus build stage: {stage_name}",
@@ -609,7 +615,7 @@ def run_corpus_build(
         store.write_manifest(CORPUS_BUILD_ARTIFACT_TYPE, config.run_id, manifest)
         report_progress(
             progress_reporter,
-            stage="corpus_build",
+            stage=CORPUS_BUILD_ARTIFACT_TYPE,
             current=total_stages,
             total=total_stages,
             message="Completed corpus build run",

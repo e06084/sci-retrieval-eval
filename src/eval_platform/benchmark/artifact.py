@@ -13,9 +13,9 @@ from eval_platform.artifacts import (
     ArtifactManifest,
     ArtifactStore,
 )
+from eval_platform.artifacts.types import BENCHMARK_RUN_ARTIFACT_TYPE
 from eval_platform.benchmark.schema import BenchmarkRunSummary
 
-BENCHMARK_RUN_ARTIFACT_TYPE = "benchmark_run"
 SUMMARY_FILENAME = "summary.json"
 _SYSTEM_METADATA_FIELDS = {
     "stage",

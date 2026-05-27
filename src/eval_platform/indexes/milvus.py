@@ -12,6 +12,12 @@ from typing import Any, Protocol
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
+from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_COLLECTION_NAME,
+    METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID,
+    METADATA_KEY_SOURCE_EMBEDDINGS_ARTIFACT_ID,
+)
+from eval_platform.artifacts.types import MILVUS_COLLECTION_ARTIFACT_TYPE
 from eval_platform.chunking import CHUNKED_CORPUS_ARTIFACT_TYPE, ChunkRecord, iter_chunk_shards
 from eval_platform.chunking.artifact import ChunkShard
 from eval_platform.chunking.progress import ProgressReporter, report_progress
@@ -22,7 +28,6 @@ from eval_platform.embeddings import (
 )
 from eval_platform.embeddings.artifact import EmbeddingShard
 
-MILVUS_COLLECTION_ARTIFACT_TYPE = "milvus_collection"
 DEFAULT_PRIMARY_KEY_FIELD = "chunk_id"
 DEFAULT_VECTOR_FIELD = "vector"
 _SENSITIVE_METADATA_KEY_PARTS = (
@@ -332,12 +337,12 @@ def default_milvus_schema(
             {"name": "end_offset", "dtype": "INT64", "nullable": True},
             {"name": "metadata", "dtype": "JSON"},
             {
-                "name": "source_chunked_corpus_artifact_id",
+                "name": METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID,
                 "dtype": "VARCHAR",
                 "max_length": 1024,
             },
             {
-                "name": "source_embeddings_artifact_id",
+                "name": METADATA_KEY_SOURCE_EMBEDDINGS_ARTIFACT_ID,
                 "dtype": "VARCHAR",
                 "max_length": 1024,
             },
@@ -422,8 +427,8 @@ def chunk_embedding_to_milvus_row(
         "start_offset": chunk.start_offset,
         "end_offset": chunk.end_offset,
         "metadata": dict(chunk.metadata),
-        "source_chunked_corpus_artifact_id": chunked_corpus_artifact_id,
-        "source_embeddings_artifact_id": embeddings_artifact_id,
+        METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID: chunked_corpus_artifact_id,
+        METADATA_KEY_SOURCE_EMBEDDINGS_ARTIFACT_ID: embeddings_artifact_id,
         "source_chunk_file": source_chunk_file,
         "source_embedding_file": source_embedding_file,
         "shard_id": shard_id,
@@ -679,9 +684,11 @@ def run_milvus_ingest(
     manifest_metadata.update(_safe_user_metadata(config.metadata))
     manifest_metadata.update(
         {
-            "source_chunked_corpus_artifact_id": config.chunked_corpus_artifact_id,
-            "source_embeddings_artifact_id": config.embeddings_artifact_id,
-            "collection_name": config.collection_name,
+            METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID: (
+                config.chunked_corpus_artifact_id
+            ),
+            METADATA_KEY_SOURCE_EMBEDDINGS_ARTIFACT_ID: config.embeddings_artifact_id,
+            METADATA_KEY_COLLECTION_NAME: config.collection_name,
             "primary_key_field": config.primary_key_field,
             "vector_field": config.vector_field,
             "vector_dim": vector_dim,
