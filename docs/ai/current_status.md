@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-Live retrieval adapters ready for merge review.
+Benchmark runner v1 ready for merge review.
 
 ## Implemented
 
@@ -31,18 +31,20 @@ Live retrieval adapters ready for merge review.
 - Retrieval hit/result schemas, RRF fusion, retrieval client protocols, retrieval runner, replay trace, replay execution mode, and `retrieval_run` artifact
 - Metrics run artifact, chunk-to-doc projection, MTEB-style IR metrics, and metrics runner
 - Live Elasticsearch and Milvus retrieval adapters with config factories
+- Benchmark run artifact and minimal Python runner for retrieval + metrics orchestration
 
 ## In Progress
 
-- Live retrieval adapters PR validation
+- Benchmark runner v1 PR validation
 
 ## Not Implemented
 
 - Frontend dashboard
 - Corpus build CLI / scheduler
 - Real rewrite / rerank adapters
-- Benchmark runner
+- Benchmark CLI / batch scheduler
+- Multi-setting comparison reports
 
 ## Next Task
 
-Open and merge live retrieval adapters PR, then start benchmark runner design.
+Open and merge benchmark runner v1 PR, then start live smoke scripts or benchmark CLI design.

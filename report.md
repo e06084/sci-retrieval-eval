@@ -4,196 +4,186 @@
 
 ## 1. 任务信息
 
-- 任务名：`live retrieval adapters`
-- 当前分支：`feat/live-retrieval-adapters`
+- 任务名：`benchmark_run v1`
+- 当前分支：`feat/benchmark-runner-v1`
 - 对应指令文件：`TASK.md`
 - 开始时间：2026-05-27
 - 完成时间：2026-05-27
 
 ## 2. 本次改动
 
-- 新增 Elasticsearch retrieval adapter：
-  - `HTTPElasticsearchRetrievalClientConfig`
-  - `HTTPElasticsearchRetrievalClient`
-  - `ElasticsearchRetrievalAdapterError`
-  - `elasticsearch_retrieval_client_from_config(...)`
-- 新增 Milvus retrieval adapter：
-  - `PymilvusRetrievalClientConfig`
-  - `PymilvusRetrievalClient`
-  - `MilvusRetrievalAdapterError`
-  - `milvus_retrieval_client_from_config(...)`
+- 新增 benchmark schema：
+  - `BenchmarkRunConfig`
+  - `BenchmarkRunSummary`
+- 新增 `benchmark_run` artifact IO：
+  - `write_benchmark_run_artifact(...)`
+  - `read_benchmark_run_artifact(...)`
+- 新增 benchmark runner：
+  - `run_benchmark(...)`
 - 更新公共导出：
-  - `src/eval_platform/retrieval/__init__.py`
+  - `src/eval_platform/benchmark/__init__.py`
 - 新增 ADR：
-  - `docs/decisions/0021-live-retrieval-adapters.md`
+  - `docs/decisions/0022-benchmark-run-artifact.md`
 - 更新：
   - `docs/ai/current_status.md`
   - `report.md`
 - 新增测试：
-  - `tests/retrieval/test_elasticsearch_adapter.py`
-  - `tests/retrieval/test_milvus_adapter.py`
+  - `tests/benchmark/test_artifact.py`
+  - `tests/benchmark/test_runner.py`
 
-## 3. Elasticsearch Adapter
+## 3. Artifact 结构
 
-`search_bm25(index_name, query, top_k)` 使用标准库 HTTP，测试通过 fake transport 注入。
-
-请求路径：
+新增 artifact type：
 
 ```text
-POST /<index_name>/_search
+benchmark_run
 ```
 
-请求 body：
+文件结构：
 
-```json
-{
-  "size": 10,
-  "query": {
-    "multi_match": {
-      "query": "...",
-      "fields": ["title^1.5", "text"]
-    }
-  },
-  "sort": [
-    {"_score": {"order": "desc"}},
-    {"chunk_id": {"order": "asc"}}
-  ],
-  "_source": [
-    "chunk_id",
-    "doc_id",
-    "title",
-    "text",
-    "chunk_index",
-    "start_offset",
-    "end_offset",
-    "metadata"
-  ]
-}
+```text
+benchmark_run/<artifact_id>/
+  summary.json
+  _MANIFEST.json
+  _SUCCESS
 ```
 
-返回解析：
+`summary.json` 保存：
 
-- `chunk_id` 优先用 `_source.chunk_id`，缺失时 fallback 到 `_id`。
-- `doc_id` / `title` / `text` 来自 `_source`。
-- `score` 和 `origin_es_score` 来自 `_score`。
-- `recall_source = "es"`。
-- `metadata` 保留 `_source.metadata` 以及 `chunk_index` / `start_offset` / `end_offset`。
+- `benchmark_run_artifact_id`
+- `setting_name`
+- `retrieval_run_artifact_id`
+- `metrics_run_artifact_id`
+- `source_normalized_dataset_artifact_id`
+- `main_score`
+- `main_score_metric`
+- `aggregate_metrics`
 
-`enrich_by_chunk_ids(...)`：
+不写入完整 per-query metrics 或 retrieval hits。
 
-- 使用 `POST /<index_name>/_mget`。
-- 保持输入 hits 顺序。
-- 保留原 hit 的 `score`、`recall_source`、`origin_es_score`、`origin_milvus_score`。
-- 补齐 `doc_id` / `title` / `text` / `metadata`。
-- 缺失 chunk 不重排，保留原 hit，并设置 `metadata["enrich_missing"] = True`。
+## 4. Runner 行为
 
-错误处理：
+`run_benchmark(...)` 执行顺序：
 
-- HTTP 非 2xx 抛 `ElasticsearchRetrievalAdapterError`。
-- invalid JSON 抛 `ElasticsearchRetrievalAdapterError`。
-- 错误信息不包含 password / Authorization header。
+1. 调用 `run_retrieval(...)` 产出 `retrieval_run`。
+2. 调用 `run_metrics(...)` 产出 `metrics_run`。
+3. 读取 metrics artifact 的 aggregate / main score。
+4. 写 `benchmark_run` summary / manifest / `_SUCCESS`。
 
-## 4. Milvus Adapter
+如果 retrieval 或 metrics 任一步失败，不会写出 `benchmark_run/_SUCCESS`。
 
-`PymilvusRetrievalClient` lazy-import `pymilvus.MilvusClient`。
+## 5. Live / Replay 路径
 
-构造行为：
+Live retrieval：
 
-- 测试可传入 fake `client`，不会 import 或访问真实 Milvus。
-- 未安装 `pymilvus` 且未传入 client 时，抛 `MilvusRetrievalAdapterError`，提示安装 `milvus` extra。
+- `retrieval.execution_mode="live"`。
+- benchmark runner 只透传 ES / Milvus / embedding / rewrite / rerank clients。
+- 缺必要 client 的错误沿用 `run_retrieval(...)`。
 
-`search(collection_name, vector, top_k)` 调用：
+Replay retrieval：
 
-```python
-client.search(
-    collection_name=collection_name,
-    data=[list(vector)],
-    anns_field=vector_field,
-    limit=top_k,
-    output_fields=output_fields,
-    search_params={"metric_type": metric_type, "params": search_params},
-)
-```
+- `retrieval.execution_mode="replay"`。
+- benchmark runner 不要求 ES / Milvus / embedding clients。
+- replay 由 `run_retrieval(...)` 复制已有 retrieval run。
+- 然后 `run_metrics(...)` 只消费 replay 后的新 retrieval artifact。
 
-返回解析：
+metrics 永远只消费 `normalized_dataset + retrieval_run`，不会重新跑检索。
 
-- 支持 pymilvus 常见 `list[list[dict]]` 结构。
-- `chunk_id` 来自 `entity[primary_key_field]`，缺失时 fallback 到 hit `id`。
-- `score` 和 `origin_milvus_score` 来自 `distance` 或 `score`。
-- `doc_id` / `title` / `text` / `metadata` 来自 `entity`。
-- `recall_source = "milvus"`。
-- 不把 `vector` 或配置的 `vector_field` 写入 `RetrievalHit.metadata`。
+## 6. Config 校验
 
-## 5. Config Factory
+`BenchmarkRunConfig` 校验：
 
-新增：
+- `output_artifact_id` 非空。
+- `source_normalized_dataset_artifact_id` 非空。
+- `retrieval.source_normalized_dataset_artifact_id` 必须匹配 benchmark source。
+- `metrics.source_normalized_dataset_artifact_id` 必须匹配 benchmark source。
+- `metrics.source_retrieval_run_artifact_id` 必须等于 `retrieval.output_artifact_id`。
+- `setting_name` 如提供必须非空。
+- `tags` 去空白，并按输入顺序去重。
 
-```python
-elasticsearch_retrieval_client_from_config(config: ElasticsearchConfig)
-milvus_retrieval_client_from_config(config: MilvusConfig)
-```
+## 7. Manifest
 
-行为：
+manifest metadata 记录：
 
-- `elasticsearch.url` 缺失时报明确错误。
-- `milvus.address` 缺失时报明确错误。
-- 不读取环境变量。
-- 不把 secret 写入 report / manifest / error message。
+- `stage = benchmark_run`
+- `source_normalized_dataset_artifact_id`
+- `retrieval_run_artifact_id`
+- `metrics_run_artifact_id`
+- `setting_name`
+- `description`
+- `tags`
+- `retrieval_mode`
+- `retrieval_execution_mode`
+- `retrieval_trace_mode`
+- `top_k`
+- `sub_queries`
+- `rewrite_enabled`
+- `rerank_enabled`
+- `metrics_k_values`
+- `doc_aggregation`
+- `doc_score`
+- `main_score_metric`
+- `main_score`
+- `retrieval_failed_query_count`
+- `metrics_evaluated_query_count`
 
-## 6. 测试策略
+dependencies 记录：
 
-- Elasticsearch adapter 测试全部使用 fake HTTP transport。
-- Milvus adapter 测试全部使用 fake Milvus client 或 monkeypatch import。
-- 集成级测试把真实 adapter 类型和 fake transport/client 注入 `run_retrieval(...)`。
-- 未访问真实 ES / Milvus / embedding / rewrite / rerank 服务。
+- `normalized_dataset`
+- `retrieval_run`
+- `metrics_run`
 
-## 7. 范围自检
+## 8. 范围自检
 
-- 是否实现 benchmark runner：`no`
-- 是否修改 metrics 逻辑：`no`
-- 是否实现 HTTP rewrite / rerank adapter：`no`
-- 是否实现 CLI / HTTP server：`no`
-- 是否访问真实外部服务：`no`
+- 是否实现 CLI：`no`
+- 是否实现 HTTP server：`no`
+- 是否访问真实 ES / Milvus / embedding / rewrite / rerank 服务：`no`
+- 是否实现 rewrite / rerank adapter：`no`
+- 是否修改 corpus build 主链路：`no`
+- 是否修改 metrics 公式：`no`
 - 是否提交 `.local_artifacts` 或真实 config / 密钥：`no`
 - 是否修改流程控制文档：`no`
 
-## 8. 自检结果
+## 9. 自检结果
 
-### 8.1 已运行命令
+### 9.1 已运行命令
 
 ```bash
-pytest tests/retrieval
+pytest tests/benchmark
+pytest tests/benchmark tests/retrieval tests/metrics
 ruff check .
 mypy .
 pytest
 ```
 
-### 8.2 输出摘要
+### 9.2 输出摘要
 
-- `pytest tests/retrieval`
-  - 通过，`31 passed`
+- `pytest tests/benchmark`
+  - 通过，`10 passed`
+- `pytest tests/benchmark tests/retrieval tests/metrics`
+  - 通过，`54 passed`
 - `ruff check .`
   - 通过，`All checks passed!`
 - `mypy .`
-  - 通过，`Success: no issues found in 132 source files`
+  - 通过，`Success: no issues found in 139 source files`
 - `pytest`
-  - 通过，`513 passed`
+  - 通过，`523 passed`
 
-## 9. 风险与未决项
+## 10. 风险与未决项
 
-- 本轮没有真实 ES / Milvus connectivity smoke，真实环境连通性仍需后续由验收或 smoke 任务执行。
-- 本轮不实现 HTTP rewrite / rerank adapter。
-- 本轮不实现 benchmark runner / CLI。
-- Milvus 返回结构在不同 pymilvus 版本可能有差异；当前覆盖常见 `list[list[dict]]` 形态。
+- 本轮是最小 Python runner，不实现 CLI / batch scheduler。
+- 本轮不做真实 S3 / ES / Milvus connectivity smoke。
+- 本轮不实现多 setting 批量执行和报告生成。
+- benchmark manifest 不展开 ES/Milvus index artifact 依赖；这些仍保留在 retrieval manifest。
 
-## 10. 交付结论
+## 11. 交付结论
 
 - 是否建议验收：`yes`
 - 是否建议合并：`yes`
 - 如果不能合并，卡点是什么：无
 
-## 11. 提交信息
+## 12. 提交信息
 
 - 是否已提交：`yes`
-- commit subject：`Add live retrieval adapters`
+- commit subject：`Add benchmark run artifact`
 - 验收者确认的最终 commit：由验收者用 `git log -1 --oneline` 确认
