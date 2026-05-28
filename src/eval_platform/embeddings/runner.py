@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, NoReturn
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationError, ValidationInfo, field_validator
 
-from eval_platform.artifacts import ArtifactManifest, ArtifactStore
+from eval_platform.artifacts import EMBEDDINGS_ARTIFACT_TYPE, ArtifactManifest, ArtifactStore
 from eval_platform.chunking import CHUNKED_CORPUS_ARTIFACT_TYPE
-from eval_platform.chunking.artifact import iter_chunk_shards
+from eval_platform.chunking.artifact import ChunkShard, iter_chunk_shards
 from eval_platform.chunking.progress import ProgressReporter, report_progress
 from eval_platform.embeddings.artifact import EmbeddingShard, write_embedding_shards_artifact
 from eval_platform.embeddings.client import EmbeddingClient
+from eval_platform.embeddings.jsonl import EmbeddingJSONLError, load_embeddings_jsonl
 from eval_platform.embeddings.schema import (
     EmbeddingConsistencyCheckResult,
     EmbeddingProvenance,
@@ -50,6 +51,92 @@ def _source_user_metadata(source_manifest_metadata: dict[str, Any]) -> dict[str,
     }
 
 
+def _embedding_file_for_chunk_shard(chunk_shard: ChunkShard) -> str:
+    return (
+        f"embeddings/{chunk_shard.shard_id}.jsonl"
+        if chunk_shard.path != "chunks.jsonl"
+        else "embeddings.jsonl"
+    )
+
+
+def _raise_resume_error(shard_id: str, reason: str) -> NoReturn:
+    raise EmbeddingRunError(f"Cannot resume embedding shard {shard_id}: {reason}")
+
+
+def _load_existing_embedding_shard(
+    output_store: ArtifactStore,
+    output_artifact_id: str,
+    chunk_shard: ChunkShard,
+    embedding_file: str,
+    *,
+    embedding_dim: int,
+) -> EmbeddingShard:
+    try:
+        shard_text = output_store.get_file(
+            EMBEDDINGS_ARTIFACT_TYPE,
+            output_artifact_id,
+            embedding_file,
+        ).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        _raise_resume_error(chunk_shard.shard_id, f"{embedding_file} is not UTF-8: {exc}")
+    except Exception as exc:
+        _raise_resume_error(chunk_shard.shard_id, f"failed to read {embedding_file}: {exc}")
+
+    try:
+        embeddings = load_embeddings_jsonl(shard_text)
+    except (EmbeddingJSONLError, ValidationError) as exc:
+        _raise_resume_error(chunk_shard.shard_id, f"{embedding_file} is invalid JSONL: {exc}")
+
+    if len(embeddings) != len(chunk_shard.chunks):
+        _raise_resume_error(
+            chunk_shard.shard_id,
+            (
+                f"row count mismatch in {embedding_file}: "
+                f"expected {len(chunk_shard.chunks)}, got {len(embeddings)}"
+            ),
+        )
+
+    for row_index, (chunk, embedding) in enumerate(
+        zip(chunk_shard.chunks, embeddings, strict=True),
+        start=1,
+    ):
+        if embedding.chunk_id != chunk.chunk_id:
+            _raise_resume_error(
+                chunk_shard.shard_id,
+                (
+                    f"chunk_id order mismatch in {embedding_file} at row {row_index}: "
+                    f"expected {chunk.chunk_id!r}, got {embedding.chunk_id!r}"
+                ),
+            )
+        if embedding.doc_id != chunk.doc_id:
+            _raise_resume_error(
+                chunk_shard.shard_id,
+                (
+                    f"doc_id order mismatch in {embedding_file} at row {row_index}: "
+                    f"expected {chunk.doc_id!r}, got {embedding.doc_id!r}"
+                ),
+            )
+        if len(embedding.vector) != embedding_dim:
+            _raise_resume_error(
+                chunk_shard.shard_id,
+                (
+                    f"vector dimension mismatch in {embedding_file} at row {row_index}: "
+                    f"expected {embedding_dim}, got {len(embedding.vector)}"
+                ),
+            )
+
+    return EmbeddingShard(
+        shard_id=chunk_shard.shard_id,
+        source_chunk_file=chunk_shard.path,
+        embedding_file=embedding_file,
+        source_chunk_count=len(chunk_shard.chunks),
+        embedding_count=len(embeddings),
+        first_chunk_id=embeddings[0].chunk_id if embeddings else None,
+        last_chunk_id=embeddings[-1].chunk_id if embeddings else None,
+        embeddings=embeddings,
+    )
+
+
 class EmbeddingRunConfig(BaseModel):
     """Configuration for an embedding run."""
 
@@ -64,6 +151,7 @@ class EmbeddingRunConfig(BaseModel):
     endpoint_ids: list[str] = Field(default_factory=list)
     batch_size: int | None = Field(default=None, gt=0)
     timeout_seconds: float | None = Field(default=None, gt=0)
+    resume_existing_shards: bool = True
     consistency_check: EmbeddingConsistencyCheckResult | None = None
     created_by: str | None = None
     code_git_sha: str | None = None
@@ -143,6 +231,37 @@ def run_embedding(
             iter_chunk_shards(source_store, config.source_artifact_id),
             start=1,
         ):
+            embedding_file = _embedding_file_for_chunk_shard(chunk_shard)
+            if config.resume_existing_shards and output_store.exists(
+                EMBEDDINGS_ARTIFACT_TYPE,
+                config.output_artifact_id,
+                embedding_file,
+            ):
+                existing_shard = _load_existing_embedding_shard(
+                    output_store,
+                    config.output_artifact_id,
+                    chunk_shard,
+                    embedding_file,
+                    embedding_dim=config.embedding_dim,
+                )
+                manifest_metadata["resumed_shard_count"] += 1
+                report_progress(
+                    progress_reporter,
+                    stage="embedding",
+                    current=shard_index,
+                    total=shard_total,
+                    message="Resumed embedding shard",
+                    metadata={
+                        "kind": "resume_shard",
+                        "shard_id": chunk_shard.shard_id,
+                        "chunk_count": len(chunk_shard.chunks),
+                        "source_chunk_file": chunk_shard.path,
+                        "embedding_file": embedding_file,
+                    },
+                )
+                yield existing_shard
+                continue
+
             shard_records: list[EmbeddingRecord] = []
             processed_in_shard = 0
             shard_batch_size = batch_size or max(1, len(chunk_shard.chunks))
@@ -212,14 +331,11 @@ def run_embedding(
                     "source_chunk_file": chunk_shard.path,
                 },
             )
+            manifest_metadata["computed_shard_count"] += 1
             yield EmbeddingShard(
                 shard_id=chunk_shard.shard_id,
                 source_chunk_file=chunk_shard.path,
-                embedding_file=(
-                    f"embeddings/{chunk_shard.shard_id}.jsonl"
-                    if chunk_shard.path != "chunks.jsonl"
-                    else "embeddings.jsonl"
-                ),
+                embedding_file=embedding_file,
                 source_chunk_count=len(chunk_shard.chunks),
                 embedding_count=len(shard_records),
                 first_chunk_id=shard_records[0].chunk_id if shard_records else None,
@@ -229,6 +345,13 @@ def run_embedding(
 
     manifest_metadata = _source_user_metadata(source_manifest.metadata)
     manifest_metadata.update(config.metadata)
+    manifest_metadata.update(
+        {
+            "resume_existing_shards": config.resume_existing_shards,
+            "resumed_shard_count": 0,
+            "computed_shard_count": 0,
+        }
+    )
 
     return write_embedding_shards_artifact(
         output_store,

@@ -22,7 +22,7 @@ from eval_platform.embeddings import (
 
 
 class RecordingTransport:
-    def __init__(self, responses: list[tuple[int, bytes]]) -> None:
+    def __init__(self, responses: list[tuple[int, bytes] | BaseException]) -> None:
         self._responses = responses
         self.calls: list[dict[str, Any]] = []
 
@@ -41,7 +41,10 @@ class RecordingTransport:
                 "timeout_seconds": timeout_seconds,
             }
         )
-        return self._responses[len(self.calls) - 1]
+        response = self._responses[len(self.calls) - 1]
+        if isinstance(response, BaseException):
+            raise response
+        return response
 
 
 class StaticEmbeddingClient:
@@ -77,6 +80,8 @@ def test_http_embedding_client_config_constructs() -> None:
     assert config.endpoint_url == "https://example.com/embed"
     assert config.timeout_seconds == 60.0
     assert config.batch_size == 32
+    assert config.max_retries == 0
+    assert config.retry_backoff_seconds == 0.0
 
 
 def test_http_embedding_client_config_rejects_empty_endpoint() -> None:
@@ -94,6 +99,19 @@ def test_http_embedding_client_config_rejects_non_positive_timeout(value: float)
 def test_http_embedding_client_config_rejects_non_positive_batch_size(value: int) -> None:
     with pytest.raises(ValidationError):
         HTTPEmbeddingClientConfig(endpoint_url="https://example.com", batch_size=value)
+
+
+def test_http_embedding_client_config_rejects_negative_retry_values() -> None:
+    with pytest.raises(ValidationError):
+        HTTPEmbeddingClientConfig(
+            endpoint_url="https://example.com",
+            max_retries=-1,
+        )
+    with pytest.raises(ValidationError):
+        HTTPEmbeddingClientConfig(
+            endpoint_url="https://example.com",
+            retry_backoff_seconds=-0.1,
+        )
 
 
 def test_http_embedding_client_config_default_headers_not_shared() -> None:
@@ -202,6 +220,89 @@ def test_http_embedding_client_raises_for_http_error_status() -> None:
     )
     with pytest.raises(EmbeddingClientError, match="HTTP 500"):
         client.embed_texts(["a"])
+
+
+def test_http_embedding_client_does_not_retry_non_429_4xx() -> None:
+    transport = RecordingTransport([(400, b'{"error": "bad request"}')])
+    client = HTTPEmbeddingClient(
+        HTTPEmbeddingClientConfig(
+            endpoint_url="https://example.com/embed",
+            max_retries=3,
+        ),
+        transport=transport,
+    )
+    with pytest.raises(EmbeddingClientError, match="HTTP 400"):
+        client.embed_texts(["a"])
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("exc", [TimeoutError("read timed out"), OSError("reset")])
+def test_http_embedding_client_retries_network_errors_and_succeeds(
+    exc: BaseException,
+) -> None:
+    transport = RecordingTransport(
+        [
+            exc,
+            (200, b'{"embeddings": [[0.1, 0.2]]}'),
+        ]
+    )
+    client = HTTPEmbeddingClient(
+        HTTPEmbeddingClientConfig(
+            endpoint_url="https://example.com/embed",
+            max_retries=1,
+        ),
+        transport=transport,
+    )
+
+    vectors = client.embed_texts(["a"])
+
+    assert vectors == [[0.1, 0.2]]
+    assert len(transport.calls) == 2
+
+
+def test_http_embedding_client_raises_when_network_retries_are_exhausted() -> None:
+    transport = RecordingTransport(
+        [
+            TimeoutError("read timed out"),
+            OSError("reset"),
+        ]
+    )
+    client = HTTPEmbeddingClient(
+        HTTPEmbeddingClientConfig(
+            endpoint_url="https://example.com/embed",
+            max_retries=1,
+        ),
+        transport=transport,
+    )
+
+    with pytest.raises(
+        EmbeddingClientError,
+        match=r"after 2 attempts \(max_retries=1\)",
+    ):
+        client.embed_texts(["a"])
+    assert len(transport.calls) == 2
+
+
+@pytest.mark.parametrize("status_code", [429, 503])
+def test_http_embedding_client_retries_retryable_http_statuses(status_code: int) -> None:
+    transport = RecordingTransport(
+        [
+            (status_code, b'{"error": "try again"}'),
+            (200, b'{"embeddings": [[0.1, 0.2]]}'),
+        ]
+    )
+    client = HTTPEmbeddingClient(
+        HTTPEmbeddingClientConfig(
+            endpoint_url="https://example.com/embed",
+            max_retries=1,
+        ),
+        transport=transport,
+    )
+
+    vectors = client.embed_texts(["a"])
+
+    assert vectors == [[0.1, 0.2]]
+    assert len(transport.calls) == 2
 
 
 def test_http_embedding_client_raises_for_invalid_json() -> None:

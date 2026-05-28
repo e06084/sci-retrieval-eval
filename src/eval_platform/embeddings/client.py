@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import time
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol, runtime_checkable
 from urllib import error, request
@@ -35,6 +36,8 @@ class HTTPEmbeddingClientConfig(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     batch_size: int = Field(default=32, gt=0)
     response_vector_field: str = "embedding"
+    max_retries: int = Field(default=0, ge=0)
+    retry_backoff_seconds: float = Field(default=0.0, ge=0)
 
     @field_validator("endpoint_url")
     @classmethod
@@ -179,10 +182,26 @@ def _default_transport(
         with request.urlopen(req, timeout=timeout_seconds) as response:
             return response.status, response.read()
     except error.HTTPError as exc:
-        _ = exc.read()
-        raise EmbeddingClientError(f"Embedding endpoint returned HTTP {exc.code}") from exc
-    except error.URLError as exc:
-        raise EmbeddingClientError("Embedding endpoint request failed") from exc
+        return exc.code, exc.read()
+
+
+def _validate_transport_result(result: Any) -> tuple[int, bytes]:
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise EmbeddingClientError("Embedding transport returned an invalid response")
+    status_code, response_body = result
+    if not isinstance(status_code, int):
+        raise EmbeddingClientError("Embedding transport returned an invalid status code")
+    if not isinstance(response_body, bytes):
+        raise EmbeddingClientError("Embedding transport returned a non-bytes response body")
+    return status_code, response_body
+
+
+def _is_retryable_http_status(status_code: int) -> bool:
+    return status_code == 429 or 500 <= status_code < 600
+
+
+def _network_error_message(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"
 
 
 class HTTPEmbeddingClient:
@@ -243,6 +262,46 @@ class HTTPEmbeddingClient:
             normalized.append(converted)
         return normalized
 
+    def _send_batch(self, payload: bytes, headers: dict[str, str]) -> bytes:
+        max_retries = self._config.max_retries
+        attempts = max_retries + 1
+
+        for attempt in range(1, attempts + 1):
+            try:
+                result = self._transport(
+                    self._config.endpoint_url,
+                    payload,
+                    headers,
+                    self._config.timeout_seconds,
+                )
+                status_code, response_body = _validate_transport_result(result)
+            except OSError as exc:
+                if attempt < attempts:
+                    if self._config.retry_backoff_seconds > 0:
+                        time.sleep(self._config.retry_backoff_seconds)
+                    continue
+                raise EmbeddingClientError(
+                    "Embedding endpoint request failed "
+                    f"after {attempt} attempts (max_retries={max_retries}): "
+                    f"{_network_error_message(exc)}"
+                ) from exc
+
+            if 200 <= status_code < 300:
+                return response_body
+            if _is_retryable_http_status(status_code):
+                if attempt < attempts:
+                    if self._config.retry_backoff_seconds > 0:
+                        time.sleep(self._config.retry_backoff_seconds)
+                    continue
+                raise EmbeddingClientError(
+                    "Embedding endpoint returned "
+                    f"HTTP {status_code} after {attempt} attempts "
+                    f"(max_retries={max_retries})"
+                )
+            raise EmbeddingClientError(f"Embedding endpoint returned HTTP {status_code}")
+
+        raise EmbeddingClientError("Embedding endpoint request failed")
+
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
@@ -254,21 +313,7 @@ class HTTPEmbeddingClient:
         for start in range(0, len(texts), self._config.batch_size):
             batch = texts[start : start + self._config.batch_size]
             payload = self._build_payload(batch)
-            result = self._transport(
-                self._config.endpoint_url,
-                payload,
-                headers,
-                self._config.timeout_seconds,
-            )
-            if not isinstance(result, tuple) or len(result) != 2:
-                raise EmbeddingClientError("Embedding transport returned an invalid response")
-            status_code, response_body = result
-            if not isinstance(status_code, int):
-                raise EmbeddingClientError("Embedding transport returned an invalid status code")
-            if status_code < 200 or status_code >= 300:
-                raise EmbeddingClientError(f"Embedding endpoint returned HTTP {status_code}")
-            if not isinstance(response_body, bytes):
-                raise EmbeddingClientError("Embedding transport returned a non-bytes response body")
+            response_body = self._send_batch(payload, headers)
             all_vectors.extend(self._extract_vectors(response_body, len(batch)))
         return all_vectors
 

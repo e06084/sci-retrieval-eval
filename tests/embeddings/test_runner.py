@@ -20,9 +20,11 @@ from eval_platform.embeddings import (
     EMBEDDINGS_FILENAME,
     EmbeddedCorpus,
     EmbeddingConsistencyCheckResult,
+    EmbeddingRecord,
     EmbeddingRunConfig,
     EmbeddingRunError,
     FakeEmbeddingClient,
+    dump_embeddings_jsonl,
     iter_embedding_shards,
     read_embeddings_artifact,
     run_embedding,
@@ -37,6 +39,16 @@ class WrongCountEmbeddingClient:
 class WrongDimEmbeddingClient:
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         return [[0.1, 0.2] for _ in texts]
+
+
+class RecordingEmbeddingClient:
+    def __init__(self, embedding_dim: int = 3) -> None:
+        self._embedding_dim = embedding_dim
+        self.calls: list[list[str]] = []
+
+    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        return [[float(index + 1) for index in range(self._embedding_dim)] for _ in texts]
 
 
 @pytest.fixture
@@ -84,6 +96,59 @@ def _config() -> EmbeddingRunConfig:
         provider="fake-provider",
         api_version="v1",
         normalized=True,
+    )
+
+
+def _write_resume_source(source_store: LocalArtifactStore) -> None:
+    write_chunked_corpus_artifact(
+        source_store,
+        "resume_chunks",
+        ChunkedCorpus(
+            chunks=[
+                ChunkRecord(
+                    chunk_id="chunk-1",
+                    doc_id="doc-1",
+                    text="first chunk text",
+                    chunk_index=0,
+                ),
+                ChunkRecord(
+                    chunk_id="chunk-2",
+                    doc_id="doc-1",
+                    text="second chunk text",
+                    chunk_index=1,
+                ),
+                ChunkRecord(
+                    chunk_id="chunk-3",
+                    doc_id="doc-2",
+                    text="third chunk text",
+                    chunk_index=0,
+                ),
+            ],
+        ),
+        file_record_num=1,
+    )
+
+
+def _resume_config(*, resume_existing_shards: bool = True) -> EmbeddingRunConfig:
+    return EmbeddingRunConfig(
+        source_artifact_id="resume_chunks",
+        output_artifact_id="resume_embeddings",
+        model_name="fake-embedding-model",
+        embedding_dim=3,
+        resume_existing_shards=resume_existing_shards,
+    )
+
+
+def _put_existing_embedding_shard(
+    output_store: LocalArtifactStore,
+    shard_id: str,
+    records: list[EmbeddingRecord],
+) -> None:
+    output_store.put_file(
+        EMBEDDINGS_ARTIFACT_TYPE,
+        "resume_embeddings",
+        f"embeddings/{shard_id}.jsonl",
+        dump_embeddings_jsonl(records).encode("utf-8"),
     )
 
 
@@ -316,6 +381,157 @@ def test_run_embedding_sharded_source_writes_aligned_embedding_shards(
         assert [chunk.doc_id for chunk in source_shard.chunks] == [
             record.doc_id for record in embedding_shard.embeddings
         ]
+
+
+def test_run_embedding_reuses_valid_existing_shard_without_calling_client(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    _write_resume_source(source_store)
+    _put_existing_embedding_shard(
+        output_store,
+        "part-00000",
+        [
+            EmbeddingRecord(chunk_id="chunk-1", doc_id="doc-1", vector=[0.1, 0.2, 0.3]),
+            EmbeddingRecord(chunk_id="chunk-2", doc_id="doc-1", vector=[0.4, 0.5, 0.6]),
+        ],
+    )
+    client = RecordingEmbeddingClient()
+    events: list[ProgressEvent] = []
+
+    manifest = run_embedding(
+        source_store,
+        output_store,
+        _resume_config(),
+        client,
+        progress_reporter=events.append,
+    )
+    loaded = read_embeddings_artifact(output_store, "resume_embeddings")
+
+    assert client.calls == [["third chunk text"]]
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "resume_embeddings") is True
+    assert [file.path for file in manifest.files] == [
+        "embeddings/part-00000.jsonl",
+        "embeddings/part-00001.jsonl",
+    ]
+    assert [shard["shard_id"] for shard in manifest.metadata["shards"]] == [
+        "part-00000",
+        "part-00001",
+    ]
+    assert manifest.metadata["embedding_count"] == 3
+    assert manifest.metadata["unique_chunk_count"] == 3
+    assert manifest.metadata["unique_doc_count"] == 2
+    assert manifest.metadata["resume_existing_shards"] is True
+    assert manifest.metadata["resumed_shard_count"] == 1
+    assert manifest.metadata["computed_shard_count"] == 1
+    assert [record.chunk_id for record in loaded.embeddings] == [
+        "chunk-1",
+        "chunk-2",
+        "chunk-3",
+    ]
+    assert [event.metadata.get("kind") for event in events] == [
+        "resume_shard",
+        "batch",
+        "shard",
+    ]
+
+
+def test_run_embedding_rejects_resumed_shard_with_chunk_id_order_mismatch(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    _write_resume_source(source_store)
+    _put_existing_embedding_shard(
+        output_store,
+        "part-00000",
+        [
+            EmbeddingRecord(chunk_id="chunk-2", doc_id="doc-1", vector=[0.1, 0.2, 0.3]),
+            EmbeddingRecord(chunk_id="chunk-1", doc_id="doc-1", vector=[0.4, 0.5, 0.6]),
+        ],
+    )
+
+    with pytest.raises(
+        EmbeddingRunError,
+        match=r"part-00000: chunk_id order mismatch",
+    ):
+        run_embedding(source_store, output_store, _resume_config(), RecordingEmbeddingClient())
+
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "resume_embeddings") is False
+
+
+def test_run_embedding_rejects_resumed_shard_with_doc_id_mismatch(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    _write_resume_source(source_store)
+    _put_existing_embedding_shard(
+        output_store,
+        "part-00000",
+        [
+            EmbeddingRecord(chunk_id="chunk-1", doc_id="doc-wrong", vector=[0.1, 0.2, 0.3]),
+            EmbeddingRecord(chunk_id="chunk-2", doc_id="doc-1", vector=[0.4, 0.5, 0.6]),
+        ],
+    )
+
+    with pytest.raises(
+        EmbeddingRunError,
+        match=r"part-00000: doc_id order mismatch",
+    ):
+        run_embedding(source_store, output_store, _resume_config(), RecordingEmbeddingClient())
+
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "resume_embeddings") is False
+
+
+def test_run_embedding_rejects_resumed_shard_with_vector_dim_mismatch(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    _write_resume_source(source_store)
+    _put_existing_embedding_shard(
+        output_store,
+        "part-00000",
+        [
+            EmbeddingRecord(chunk_id="chunk-1", doc_id="doc-1", vector=[0.1, 0.2]),
+            EmbeddingRecord(chunk_id="chunk-2", doc_id="doc-1", vector=[0.4, 0.5, 0.6]),
+        ],
+    )
+
+    with pytest.raises(
+        EmbeddingRunError,
+        match=r"part-00000: vector dimension mismatch",
+    ):
+        run_embedding(source_store, output_store, _resume_config(), RecordingEmbeddingClient())
+
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "resume_embeddings") is False
+
+
+def test_run_embedding_resume_existing_shards_false_recomputes_existing_shard(
+    source_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    _write_resume_source(source_store)
+    _put_existing_embedding_shard(
+        output_store,
+        "part-00000",
+        [
+            EmbeddingRecord(chunk_id="chunk-1", doc_id="doc-1", vector=[0.1, 0.2, 0.3]),
+            EmbeddingRecord(chunk_id="chunk-2", doc_id="doc-1", vector=[0.4, 0.5, 0.6]),
+        ],
+    )
+    client = RecordingEmbeddingClient()
+
+    manifest = run_embedding(
+        source_store,
+        output_store,
+        _resume_config(resume_existing_shards=False),
+        client,
+    )
+
+    assert client.calls == [["first chunk text", "second chunk text"], ["third chunk text"]]
+    assert output_store.is_complete(EMBEDDINGS_ARTIFACT_TYPE, "resume_embeddings") is True
+    assert manifest.metadata["resume_existing_shards"] is False
+    assert manifest.metadata["resumed_shard_count"] == 0
+    assert manifest.metadata["computed_shard_count"] == 2
 
 
 def test_run_embedding_reports_batch_and_shard_progress(
