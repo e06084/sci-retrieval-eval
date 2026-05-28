@@ -27,6 +27,7 @@ from eval_platform.artifacts.store import (
 from eval_platform.artifacts.types import (
     ALL_ARTIFACT_TYPES,
     BENCHMARK_RUN_ARTIFACT_TYPE,
+    BENCHMARK_SUITE_RUN_ARTIFACT_TYPE,
     CHUNKED_CORPUS_ARTIFACT_TYPE,
     CORPUS_ASSET_STAGE_ORDER,
     CORPUS_BUILD_ARTIFACT_TYPE,
@@ -42,6 +43,7 @@ from eval_platform.artifacts.types import (
 __all__ = [
     "ALL_ARTIFACT_TYPES",
     "BENCHMARK_RUN_ARTIFACT_TYPE",
+    "BENCHMARK_SUITE_RUN_ARTIFACT_TYPE",
     "CHUNKED_CORPUS_ARTIFACT_TYPE",
     "CORPUS_ASSET_STAGE_ORDER",
     "CORPUS_BUILD_ARTIFACT_TYPE",

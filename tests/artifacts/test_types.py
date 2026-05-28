@@ -9,6 +9,9 @@ from eval_platform.artifacts import (
     BENCHMARK_RUN_ARTIFACT_TYPE as EXPORTED_BENCHMARK_RUN_ARTIFACT_TYPE,
 )
 from eval_platform.artifacts import (
+    BENCHMARK_SUITE_RUN_ARTIFACT_TYPE as EXPORTED_BENCHMARK_SUITE_RUN_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
     CHUNKED_CORPUS_ARTIFACT_TYPE as EXPORTED_CHUNKED_CORPUS_ARTIFACT_TYPE,
 )
 from eval_platform.artifacts import (
@@ -41,6 +44,7 @@ from eval_platform.artifacts import (
 from eval_platform.artifacts.types import (
     ALL_ARTIFACT_TYPES,
     BENCHMARK_RUN_ARTIFACT_TYPE,
+    BENCHMARK_SUITE_RUN_ARTIFACT_TYPE,
     CHUNKED_CORPUS_ARTIFACT_TYPE,
     CORPUS_ASSET_STAGE_ORDER,
     CORPUS_BUILD_ARTIFACT_TYPE,
@@ -76,9 +80,10 @@ def test_all_artifact_types_are_complete_and_unique() -> None:
         RETRIEVAL_RUN_ARTIFACT_TYPE,
         METRICS_RUN_ARTIFACT_TYPE,
         BENCHMARK_RUN_ARTIFACT_TYPE,
+        BENCHMARK_SUITE_RUN_ARTIFACT_TYPE,
         CORPUS_BUILD_ARTIFACT_TYPE,
     ]
-    assert len(ALL_ARTIFACT_TYPES) == 10
+    assert len(ALL_ARTIFACT_TYPES) == 11
     assert len(set(ALL_ARTIFACT_TYPES)) == len(ALL_ARTIFACT_TYPES)
 
 
@@ -98,6 +103,10 @@ def test_legacy_public_artifact_type_imports_match_registry() -> None:
     assert retrieval.RETRIEVAL_RUN_ARTIFACT_TYPE == RETRIEVAL_RUN_ARTIFACT_TYPE
     assert metrics.METRICS_RUN_ARTIFACT_TYPE == METRICS_RUN_ARTIFACT_TYPE
     assert benchmark.BENCHMARK_RUN_ARTIFACT_TYPE == BENCHMARK_RUN_ARTIFACT_TYPE
+    assert (
+        benchmark.BENCHMARK_SUITE_RUN_ARTIFACT_TYPE
+        == BENCHMARK_SUITE_RUN_ARTIFACT_TYPE
+    )
     assert corpus_build.CORPUS_BUILD_ARTIFACT_TYPE == CORPUS_BUILD_ARTIFACT_TYPE
 
 
@@ -122,4 +131,8 @@ def test_artifacts_package_exports_artifact_type_registry() -> None:
     assert EXPORTED_RETRIEVAL_RUN_ARTIFACT_TYPE == RETRIEVAL_RUN_ARTIFACT_TYPE
     assert EXPORTED_METRICS_RUN_ARTIFACT_TYPE == METRICS_RUN_ARTIFACT_TYPE
     assert EXPORTED_BENCHMARK_RUN_ARTIFACT_TYPE == BENCHMARK_RUN_ARTIFACT_TYPE
+    assert (
+        EXPORTED_BENCHMARK_SUITE_RUN_ARTIFACT_TYPE
+        == BENCHMARK_SUITE_RUN_ARTIFACT_TYPE
+    )
     assert EXPORTED_CORPUS_BUILD_ARTIFACT_TYPE == CORPUS_BUILD_ARTIFACT_TYPE
