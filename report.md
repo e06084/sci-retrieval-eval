@@ -275,3 +275,72 @@ mypy .
 外部服务访问：
 
 - 是否访问真实 S3 / ES / Milvus / embedding / rerank / rewrite：`no`
+
+## 14. 开发记录：benchmark suite query_limit + E1-E4 runbook
+
+分支名：`feat/benchmark-suite-query-limit-and-runbook`
+
+实现提交 SHA：`183516cb91b219e1379a1ae568e1beb00830b576`
+
+新增 `query_limit` 行为：
+
+- `BenchmarkSuiteRunConfig` 新增 `query_limit: int | None = Field(default=None, gt=0)`。
+- 默认 `None`，保持原有全量查询行为。
+- `query_limit=3`、`query_limit=50` 等正整数合法。
+- `query_limit=0` 或负数由 Pydantic 校验报错。
+- `build_benchmark_run_config(...)` 生成 child `RetrievalRunConfig` 时传入 `suite_config.query_limit`。
+- `query_limit` 只影响 child retrieval config，不影响 metrics config。
+- artifact id 生成规则、E1-E4 setting 语义、suite summary schema 均未改变。
+
+suite manifest metadata：
+
+- `_suite_manifest_metadata(...)` 已记录 `query_limit`。
+- `query_limit=None` 会写入 manifest metadata，便于区分 full baseline。
+- `query_limit=3` / `50` 会写入 manifest metadata，便于审计 smoke / stability run。
+
+新增 runbook：
+
+- `docs/operations/e1_e4_benchmark_suite.md`
+
+runbook 覆盖：
+
+- 每个 dataset 需要显式提供的 asset spec。
+- normalized -> chunked -> embeddings -> ES/Milvus 同链路约束。
+- E1-E4 setting 语义。
+- baseline 必须保持 `trace_mode = replay`。
+- 推荐执行顺序：1 dataset smoke、5 dataset smoke、query_limit=50、full baseline。
+- 输出检查项。
+- 本轮不实现 CLI、真实运行、E5/E6、variant spec、query analysis、comparison report。
+
+测试命令和结果：
+
+```bash
+pytest tests/benchmark
+pytest
+ruff check .
+mypy .
+```
+
+结果：
+
+- `pytest tests/benchmark`
+  - `24 passed in 0.32s`
+- `pytest`
+  - `600 passed in 2.49s`
+- `ruff check .`
+  - `All checks passed!`
+- `mypy .`
+  - `Success: no issues found in 171 source files`
+
+外部服务访问：
+
+- 是否访问真实 S3 / ES / Milvus / embedding / rerank / rewrite：`no`
+
+未实现项：
+
+- CLI。
+- 真实五数据集运行。
+- E5/E6。
+- variant spec。
+- query analysis artifact。
+- comparison report。

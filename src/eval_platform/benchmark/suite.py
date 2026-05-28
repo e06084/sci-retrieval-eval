@@ -86,6 +86,7 @@ class BenchmarkSuiteRunConfig(BaseModel):
     metrics_k_values: list[int] = Field(
         default_factory=lambda: [1, 3, 5, 10, 20, 100, 1000]
     )
+    query_limit: int | None = Field(default=None, gt=0)
     queries_per_shard: int = Field(default=1000, gt=0)
     created_by: str | None = None
     code_git_sha: str | None = None
@@ -187,6 +188,7 @@ def build_benchmark_run_config(
         output_artifact_id=retrieval_id,
         retrieval_mode=setting.retrieval_mode,
         top_k=setting.top_k,
+        query_limit=suite_config.query_limit,
         queries_per_shard=suite_config.queries_per_shard,
         trace_mode=setting.trace_mode,
         elasticsearch_index_artifact_id=dataset.elasticsearch_index_artifact_id,
@@ -331,6 +333,7 @@ def _suite_manifest_metadata(config: BenchmarkSuiteRunConfig) -> dict[str, Any]:
             "dataset_count": len(config.datasets),
             "setting_count": len(config.settings),
             "item_count": len(config.datasets) * len(config.settings),
+            "query_limit": config.query_limit,
             "datasets": [
                 dataset.model_dump(mode="json")
                 for dataset in config.datasets

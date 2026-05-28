@@ -1,0 +1,102 @@
+# E1-E4 Benchmark Suite Runbook
+
+本文档说明如何从已完成的五数据集 corpus/index artifacts 进入 E1-E4 benchmark suite smoke 和 full baseline。本文档只是 runbook，不新增 CLI，不包含真实密钥或真实 `config.yaml` 内容。
+
+## 1. 输入 Artifacts
+
+每个 dataset 必须显式提供一组 asset spec：
+
+```text
+dataset_key
+task_name
+normalized_dataset_artifact_id
+elasticsearch_index_artifact_id
+milvus_collection_artifact_id
+index_name
+collection_name
+```
+
+这些输入必须来自同一条 artifact chain，不能混用不同 run 或不同版本的 artifact：
+
+```text
+normalized_dataset -> chunked_corpus -> embeddings -> elasticsearch_index / milvus_collection
+```
+
+最低检查：
+
+- `normalized_dataset_artifact_id` 对应的 normalized artifact 已 complete。
+- `elasticsearch_index_artifact_id` 的 manifest dependency 指向同一条 chain 的 `chunked_corpus`。
+- `milvus_collection_artifact_id` 的 manifest dependencies 指向同一条 chain 的 `chunked_corpus` 和 `embeddings`。
+- `index_name` 必须来自 Elasticsearch index artifact manifest metadata。
+- `collection_name` 必须来自 Milvus collection artifact manifest metadata。
+
+不要用新 run_id 猜测真实 ES index 或 Milvus collection 名。复用现有 ES/Milvus 资源时，资源名必须来自 reused artifact manifest。
+
+## 2. E1-E4 Settings
+
+默认 E1-E4 baseline settings：
+
+```text
+E1-milvus: milvus + ES enrich, no rewrite, no rerank
+E2-es: ES BM25, no rewrite, no rerank
+E3-hybrid: Milvus + ES + RRF, no rewrite, no rerank
+E4-hybrid-rerank: Milvus + ES + RRF + rerank, no rewrite
+```
+
+Baseline 必须保持：
+
+```text
+trace_mode = replay
+```
+
+不要在 baseline 中关闭 trace。trace 是后续 replay、排查失败 query、比较 setting 行为的基础审计数据。
+
+## 3. 推荐执行顺序
+
+建议按以下顺序推进，逐步扩大运行规模：
+
+1. `inventory` / dry-run 确认五数据集 corpus/index artifacts。
+2. 1 dataset x E1-E4 x `query_limit=3` smoke。
+3. 5 datasets x E1-E4 x `query_limit=3` smoke。
+4. 5 datasets x E1-E4 x `query_limit=50` 稳定性验证。
+5. 5 datasets x E1-E4 full baseline，此时 `query_limit=None`。
+
+`query_limit=3` 或 `query_limit=5` 用于快速链路 smoke；`query_limit=50` 用于中等规模稳定性验证；`query_limit=None` 表示全量运行。
+
+## 4. 输出检查
+
+每轮运行后检查：
+
+```text
+retrieval_run complete
+metrics_run complete
+benchmark_run complete
+benchmark_suite_run complete
+suite item_count = dataset_count x setting_count
+metrics 有 main_score
+retrieval_run 有 trace
+suite dependencies 指向 child benchmark_run
+```
+
+建议逐项确认：
+
+- 每个 suite item 都有 `benchmark_run_artifact_id`、`retrieval_run_artifact_id`、`metrics_run_artifact_id`。
+- 每个 child `benchmark_run` manifest dependencies 指向对应 `retrieval_run` 和 `metrics_run`。
+- `benchmark_suite_run` manifest dependencies 指向所有 child `benchmark_run`。
+- `benchmark_suite_run` manifest metadata 记录 `dataset_count`、`setting_count`、`item_count` 和本轮 `query_limit`。
+- `metrics_run` summary 中 `main_score_metric` 和 `main_score` 非空。
+- `retrieval_run` record 在 baseline 中保留 replay trace。
+
+## 5. 本轮未实现内容
+
+本文档是 runbook，不新增 CLI。真实运行仍需后续单独执行。
+
+本轮不实现：
+
+- E5/E6。
+- rewrite setting。
+- variant spec。
+- query analysis。
+- comparison report。
+- 并发调度。
+- 真实五数据集运行。

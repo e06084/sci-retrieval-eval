@@ -166,12 +166,14 @@ def _suite_config(
     suite_run_id: str = "suite-1",
     datasets: list[BenchmarkDatasetSpec] | None = None,
     settings: list[BenchmarkSettingSpec] | None = None,
+    query_limit: int | None = None,
 ) -> BenchmarkSuiteRunConfig:
     return BenchmarkSuiteRunConfig(
         suite_run_id=suite_run_id,
         datasets=datasets or [_dataset()],
         settings=settings or settings_for_selection(),
         metrics_k_values=[1, 10],
+        query_limit=query_limit,
     )
 
 
@@ -191,6 +193,14 @@ def test_suite_config_validates_keys_and_duplicates() -> None:
         )
 
 
+def test_suite_config_validates_query_limit() -> None:
+    assert _suite_config(query_limit=3).query_limit == 3
+    with pytest.raises(ValueError, match="query_limit"):
+        _suite_config(query_limit=0)
+    with pytest.raises(ValueError, match="query_limit"):
+        _suite_config(query_limit=-1)
+
+
 def test_build_benchmark_run_config_generates_stable_artifact_ids() -> None:
     config = _suite_config(settings=settings_for_selection("E3-hybrid"))
     item = build_benchmark_run_config(
@@ -203,6 +213,22 @@ def test_build_benchmark_run_config_generates_stable_artifact_ids() -> None:
     assert item.retrieval.output_artifact_id == "suite-1__ds1__E3-hybrid__retrieval"
     assert item.metrics.output_artifact_id == "suite-1__ds1__E3-hybrid__metrics"
     assert " " not in item.output_artifact_id
+
+
+def test_build_benchmark_run_config_passes_query_limit_to_retrieval_only() -> None:
+    config = _suite_config(query_limit=3, settings=settings_for_selection("E2-es"))
+    item = build_benchmark_run_config(config, config.datasets[0], config.settings[0])
+
+    assert item.retrieval.query_limit == 3
+    assert not hasattr(item.metrics, "query_limit")
+
+    unlimited_config = _suite_config(settings=settings_for_selection("E2-es"))
+    unlimited_item = build_benchmark_run_config(
+        unlimited_config,
+        unlimited_config.datasets[0],
+        unlimited_config.settings[0],
+    )
+    assert unlimited_item.retrieval.query_limit is None
 
 
 def test_build_benchmark_run_config_maps_e1_to_e4_retrieval_settings() -> None:
@@ -287,9 +313,25 @@ def test_run_benchmark_suite_runs_items_and_writes_stable_summary(
     assert manifest.metadata["dataset_count"] == 2
     assert manifest.metadata["setting_count"] == 2
     assert manifest.metadata["item_count"] == 4
+    assert manifest.metadata["query_limit"] is None
     assert store.is_complete(BENCHMARK_SUITE_RUN_ARTIFACT_TYPE, "suite-1") is True
     assert "query_metrics" not in raw_summary
     assert "hits" not in raw_summary
+
+
+def test_run_benchmark_suite_records_query_limit_in_manifest(
+    store: LocalArtifactStore,
+) -> None:
+    config = _suite_config(query_limit=1, settings=settings_for_selection("E2-es"))
+
+    manifest = run_benchmark_suite(
+        store,
+        store,
+        config,
+        es_client=FakeElasticsearchClient(),
+    )
+
+    assert manifest.metadata["query_limit"] == 1
 
 
 def test_run_benchmark_suite_failure_does_not_write_success_marker(
