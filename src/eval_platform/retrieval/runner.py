@@ -7,6 +7,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
+from eval_platform.assets import (
+    add_asset_fingerprint_metadata,
+    manifest_asset_fingerprint_sha256,
+    retrieval_run_fingerprint_components,
+)
 from eval_platform.datasets import (
     NORMALIZED_DATASET_ARTIFACT_TYPE,
     read_normalized_dataset_artifact,
@@ -142,7 +147,10 @@ def run_retrieval(
             source_store,
             output_store,
             config,
-            build_manifest_metadata=_build_manifest_metadata,
+            build_manifest_metadata=lambda replay_config: _build_manifest_metadata(
+                replay_config,
+                source_store=source_store,
+            ),
             build_dependencies=_build_dependencies,
         )
 
@@ -189,7 +197,7 @@ def run_retrieval(
                 )
             )
 
-    metadata = _build_manifest_metadata(config)
+    metadata = _build_manifest_metadata(config, source_store=source_store)
     return write_retrieval_run_artifact(
         output_store,
         config.output_artifact_id,
@@ -287,7 +295,11 @@ def _retrieve_one_query(
     )
 
 
-def _build_manifest_metadata(config: RetrievalRunConfig) -> dict[str, Any]:
+def _build_manifest_metadata(
+    config: RetrievalRunConfig,
+    *,
+    source_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
     metadata = dict(config.metadata)
     metadata.update(
         {
@@ -312,7 +324,126 @@ def _build_manifest_metadata(config: RetrievalRunConfig) -> dict[str, Any]:
             "collection_name": config.collection_name,
         }
     )
+    add_asset_fingerprint_metadata(
+        metadata,
+        artifact_type=RETRIEVAL_RUN_ARTIFACT_TYPE,
+        components=_retrieval_asset_fingerprint_components(
+            config,
+            source_store=source_store,
+        ),
+    )
     return metadata
+
+
+def _retrieval_asset_fingerprint_components(
+    config: RetrievalRunConfig,
+    *,
+    source_store: ArtifactStore | None,
+) -> dict[str, Any] | None:
+    if source_store is None:
+        return None
+
+    normalized_fingerprint = _manifest_fingerprint(
+        source_store,
+        NORMALIZED_DATASET_ARTIFACT_TYPE,
+        config.source_normalized_dataset_artifact_id,
+    )
+    if normalized_fingerprint is None:
+        return None
+
+    es_fingerprint = (
+        _manifest_fingerprint(
+            source_store,
+            ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+            config.elasticsearch_index_artifact_id,
+        )
+        if config.elasticsearch_index_artifact_id is not None
+        else None
+    )
+    milvus_fingerprint = (
+        _manifest_fingerprint(
+            source_store,
+            MILVUS_COLLECTION_ARTIFACT_TYPE,
+            config.milvus_collection_artifact_id,
+        )
+        if config.milvus_collection_artifact_id is not None
+        else None
+    )
+    if config.retrieval_mode in {"es", "hybrid"} and es_fingerprint is None:
+        return None
+    if config.retrieval_mode in {"milvus", "hybrid"} and milvus_fingerprint is None:
+        return None
+
+    metadata = config.metadata
+    return retrieval_run_fingerprint_components(
+        normalized_dataset_fingerprint=normalized_fingerprint,
+        retrieval_mode=config.retrieval_mode,
+        elasticsearch_index_fingerprint=es_fingerprint,
+        milvus_collection_fingerprint=milvus_fingerprint,
+        query_source={"query_limit": config.query_limit},
+        query_embedding=_optional_mapping(metadata.get("query_embedding")),
+        search_params={
+            "top_k": config.top_k,
+            "sub_queries": config.sub_queries,
+            "es": {
+                "enabled": config.retrieval_mode in {"es", "hybrid"},
+                "top_k": (
+                    config.top_k
+                    if config.retrieval_mode == "es"
+                    else max(config.hybrid_per_source_topk, config.rrf_path_topk)
+                ),
+            },
+            "milvus": {
+                "enabled": config.retrieval_mode in {"milvus", "hybrid"},
+                "top_k": (
+                    config.top_k
+                    if config.retrieval_mode == "milvus"
+                    else max(config.hybrid_per_source_topk, config.rrf_path_topk)
+                ),
+            },
+            "fusion": {
+                "method": "rrf" if config.retrieval_mode == "hybrid" else None,
+                "path_topk": config.rrf_path_topk,
+            },
+        },
+        rewrite=_optional_mapping(metadata.get("rewrite"))
+        or (
+            {"enabled": True, "sub_queries": config.sub_queries}
+            if config.rewrite_enabled
+            else None
+        ),
+        rerank=_optional_mapping(metadata.get("rerank"))
+        or (
+            {
+                "enabled": True,
+                "candidate_cap": config.rerank_candidate_cap,
+                "cross_path_topk": config.rerank_cross_path_topk,
+            }
+            if config.rerank_enabled
+            else None
+        ),
+        trace_mode=config.trace_mode,
+    )
+
+
+def _manifest_fingerprint(
+    store: ArtifactStore,
+    artifact_type: str,
+    artifact_id: str | None,
+) -> str | None:
+    if artifact_id is None:
+        return None
+    try:
+        manifest = store.read_manifest(artifact_type, artifact_id)
+    except Exception:
+        return None
+    return manifest_asset_fingerprint_sha256(manifest)
+
+
+def _optional_mapping(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    return None
 
 
 def _build_dependencies(config: RetrievalRunConfig) -> list[ArtifactDependency]:

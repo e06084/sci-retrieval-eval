@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from eval_platform.artifacts.manifest import ArtifactDependency, ArtifactManifest
 from eval_platform.artifacts.store import ArtifactStore
+from eval_platform.artifacts.types import NORMALIZED_DATASET_ARTIFACT_TYPE
+from eval_platform.assets import manifest_asset_fingerprint_sha256
 from eval_platform.chunking.artifact import build_chunk_shards, write_chunked_corpus_artifact
 from eval_platform.chunking.git import ensure_git_repo_clean
 from eval_platform.chunking.progress import ProgressReporter, report_progress
@@ -64,6 +66,10 @@ def run_chunking(
 ) -> ArtifactManifest:
     """Run chunking against a normalized dataset artifact and write output."""
     git_state = ensure_git_repo_clean(config.chunker_repo_path)
+    source_manifest = store.read_manifest(
+        NORMALIZED_DATASET_ARTIFACT_TYPE,
+        config.source_artifact_id,
+    )
     dataset = read_normalized_dataset_artifact(store, config.source_artifact_id)
     chunks: list[ChunkRecord] = []
     completed_doc_count = 0
@@ -154,5 +160,10 @@ def run_chunking(
         file_record_num=config.file_record_num,
         created_by=config.created_by,
         code_git_sha=config.code_git_sha,
-        metadata=config.metadata,
+        metadata={
+            **config.metadata,
+            "normalized_dataset_fingerprint": (
+                manifest_asset_fingerprint_sha256(source_manifest)
+            ),
+        },
     )

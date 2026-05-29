@@ -11,7 +11,9 @@ from typing import Any, BinaryIO, Literal, Protocol
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest
+from eval_platform.artifacts.metadata_keys import METADATA_KEY_ASSET_FINGERPRINT_SHA256
 from eval_platform.artifacts.store import ArtifactStore
+from eval_platform.assets import manifest_asset_fingerprint_sha256
 from eval_platform.chunking.progress import ProgressReporter, report_progress
 from eval_platform.datasets.normalized import write_normalized_dataset_artifact
 from eval_platform.datasets.raw import (
@@ -525,6 +527,10 @@ def normalize_raw_dataset_artifact(
 ) -> ArtifactManifest:
     """Normalize one raw snapshot artifact into a normalized dataset artifact."""
     snapshot = read_raw_dataset_artifact(source_store, config.source_artifact_id)
+    raw_manifest = source_store.read_manifest(
+        RAW_DATASET_ARTIFACT_TYPE,
+        config.source_artifact_id,
+    )
     spec = _resolve_raw_normalizer_spec(config)
 
     if spec.raw_format == "jsonl_tsv":
@@ -553,10 +559,21 @@ def normalize_raw_dataset_artifact(
             "task_name": config.dataset_name,
             "split": config.split,
             "normalizer_name": spec.normalizer_name,
+            "normalizer_version": "1",
+            "normalizer_params": {
+                "split": config.split,
+                "raw_format": spec.raw_format,
+                "has_instructions": spec.has_instructions,
+            },
             "raw_format": spec.raw_format,
             "has_instructions": spec.has_instructions,
             "raw_dataset_artifact_id": config.source_artifact_id,
             "raw_dataset_fingerprint": snapshot.content_fingerprint_sha256,
+            "raw_dataset_asset_fingerprint_sha256": (
+                manifest_asset_fingerprint_sha256(raw_manifest)
+                or raw_manifest.metadata.get(METADATA_KEY_ASSET_FINGERPRINT_SHA256)
+                or snapshot.content_fingerprint_sha256
+            ),
             "raw_source_uri": raw_source_uri,
             "normalized_schema_version": _NORMALIZED_SCHEMA_VERSION,
         }

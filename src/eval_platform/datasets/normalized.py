@@ -4,8 +4,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from eval_platform.artifacts.manifest import ArtifactDependency, ArtifactFile, ArtifactManifest
+from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_ASSET_FINGERPRINT,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
+)
 from eval_platform.artifacts.store import ArtifactIncompleteError, ArtifactStore
 from eval_platform.artifacts.types import NORMALIZED_DATASET_ARTIFACT_TYPE
+from eval_platform.assets import (
+    add_asset_fingerprint_metadata,
+    normalized_dataset_fingerprint_components,
+)
 from eval_platform.datasets.jsonl import dump_jsonl, load_jsonl
 from eval_platform.datasets.schema import (
     CorpusRecord,
@@ -17,6 +25,13 @@ from eval_platform.datasets.schema import (
 CORPUS_FILENAME = "corpus.jsonl"
 QUERIES_FILENAME = "queries.jsonl"
 QRELS_FILENAME = "qrels.jsonl"
+_SYSTEM_METADATA_FIELDS = {
+    "corpus_count",
+    "query_count",
+    "qrel_count",
+    METADATA_KEY_ASSET_FINGERPRINT,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
+}
 
 
 def write_normalized_dataset_artifact(
@@ -55,6 +70,11 @@ def write_normalized_dataset_artifact(
             "qrel_count": len(dataset.qrels),
         }
     )
+    add_asset_fingerprint_metadata(
+        manifest_metadata,
+        artifact_type=NORMALIZED_DATASET_ARTIFACT_TYPE,
+        components=_normalized_asset_fingerprint_components(manifest_metadata),
+    )
 
     manifest = ArtifactManifest(
         artifact_id=artifact_id,
@@ -90,7 +110,7 @@ def read_normalized_dataset_artifact(
     dataset_metadata = {
         key: value
         for key, value in manifest.metadata.items()
-        if key not in {"corpus_count", "query_count", "qrel_count"}
+        if key not in _SYSTEM_METADATA_FIELDS
     }
 
     corpus_text = store.get_file(
@@ -108,4 +128,43 @@ def read_normalized_dataset_artifact(
         queries=load_jsonl(queries_text, QueryRecord),
         qrels=load_jsonl(qrels_text, QrelRecord),
         metadata=dataset_metadata,
+    )
+
+
+def _normalized_asset_fingerprint_components(
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    raw_fingerprint = metadata.get("raw_dataset_asset_fingerprint_sha256") or metadata.get(
+        "raw_dataset_fingerprint"
+    )
+    normalizer_name = metadata.get("normalizer_name")
+    schema_version = metadata.get("normalized_schema_version") or metadata.get("schema_version")
+    if not (
+        isinstance(raw_fingerprint, str)
+        and raw_fingerprint.strip()
+        and isinstance(normalizer_name, str)
+        and normalizer_name.strip()
+        and isinstance(schema_version, str)
+        and schema_version.strip()
+    ):
+        return None
+
+    normalizer_version = metadata.get("normalizer_version")
+    if not isinstance(normalizer_version, str) or not normalizer_version.strip():
+        normalizer_version = "1"
+
+    normalizer_params = metadata.get("normalizer_params")
+    if not isinstance(normalizer_params, dict):
+        normalizer_params = {
+            key: metadata[key]
+            for key in ("split", "raw_format", "has_instructions")
+            if key in metadata
+        }
+
+    return normalized_dataset_fingerprint_components(
+        raw_dataset_fingerprint=raw_fingerprint,
+        normalizer_name=normalizer_name,
+        normalizer_version=normalizer_version,
+        schema_version=schema_version,
+        normalizer_params=normalizer_params,
     )

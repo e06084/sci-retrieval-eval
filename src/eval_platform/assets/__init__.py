@@ -15,19 +15,35 @@ from eval_platform.assets.fingerprint import (
     raw_dataset_fingerprint_components,
     retrieval_run_fingerprint_components,
 )
+from eval_platform.assets.manifest import (
+    ASSET_FINGERPRINT_METADATA_KEYS,
+    AssetFingerprintMetadataError,
+    add_asset_fingerprint_metadata,
+    asset_fingerprint_metadata,
+    manifest_asset_fingerprint_sha256,
+    require_manifest_asset_fingerprint_sha256,
+    strip_asset_fingerprint_metadata,
+)
 
 __all__ = [
+    "ASSET_FINGERPRINT_METADATA_KEYS",
     "AssetFingerprint",
     "AssetFingerprintError",
+    "AssetFingerprintMetadataError",
+    "add_asset_fingerprint_metadata",
     "assert_no_secret_keys",
+    "asset_fingerprint_metadata",
     "build_asset_fingerprint",
     "canonical_json_hash",
     "chunked_corpus_fingerprint_components",
     "elasticsearch_index_fingerprint_components",
     "embeddings_fingerprint_components",
+    "manifest_asset_fingerprint_sha256",
     "metrics_run_fingerprint_components",
     "milvus_collection_fingerprint_components",
     "normalized_dataset_fingerprint_components",
     "raw_dataset_fingerprint_components",
+    "require_manifest_asset_fingerprint_sha256",
     "retrieval_run_fingerprint_components",
+    "strip_asset_fingerprint_metadata",
 ]

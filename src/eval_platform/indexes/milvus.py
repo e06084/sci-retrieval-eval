@@ -18,6 +18,11 @@ from eval_platform.artifacts.metadata_keys import (
     METADATA_KEY_SOURCE_EMBEDDINGS_ARTIFACT_ID,
 )
 from eval_platform.artifacts.types import MILVUS_COLLECTION_ARTIFACT_TYPE
+from eval_platform.assets import (
+    add_asset_fingerprint_metadata,
+    manifest_asset_fingerprint_sha256,
+    milvus_collection_fingerprint_components,
+)
 from eval_platform.chunking import CHUNKED_CORPUS_ARTIFACT_TYPE, ChunkRecord, iter_chunk_shards
 from eval_platform.chunking.artifact import ChunkShard
 from eval_platform.chunking.progress import ProgressReporter, report_progress
@@ -708,6 +713,25 @@ def run_milvus_ingest(
             "shards": shard_metadata,
         }
     )
+    chunk_manifest = chunk_store.read_manifest(
+        CHUNKED_CORPUS_ARTIFACT_TYPE,
+        config.chunked_corpus_artifact_id,
+    )
+    embedding_manifest = embedding_store.read_manifest(
+        EMBEDDINGS_ARTIFACT_TYPE,
+        config.embeddings_artifact_id,
+    )
+    add_asset_fingerprint_metadata(
+        manifest_metadata,
+        artifact_type=MILVUS_COLLECTION_ARTIFACT_TYPE,
+        components=_milvus_asset_fingerprint_components(
+            config=config,
+            chunked_corpus_fingerprint=manifest_asset_fingerprint_sha256(chunk_manifest),
+            embeddings_fingerprint=manifest_asset_fingerprint_sha256(embedding_manifest),
+            schema=schema,
+            index_params=index_params,
+        ),
+    )
 
     manifest = ArtifactManifest(
         artifact_id=config.output_artifact_id,
@@ -738,3 +762,38 @@ def run_milvus_ingest(
         config.output_artifact_id,
     )
     return manifest
+
+
+def _milvus_asset_fingerprint_components(
+    *,
+    config: MilvusIngestConfig,
+    chunked_corpus_fingerprint: str | None,
+    embeddings_fingerprint: str | None,
+    schema: dict[str, Any],
+    index_params: dict[str, Any],
+) -> dict[str, Any] | None:
+    if chunked_corpus_fingerprint is None or embeddings_fingerprint is None:
+        return None
+
+    index_type = str(index_params.get("index_type", "AUTOINDEX"))
+    fingerprint_index_params = {
+        key: value
+        for key, value in index_params.items()
+        if key not in {"index_type", "index_name"}
+    }
+    return milvus_collection_fingerprint_components(
+        chunked_corpus_fingerprint=chunked_corpus_fingerprint,
+        embeddings_fingerprint=embeddings_fingerprint,
+        builder_source="sci-retrieval-eval",
+        code_git_commit=config.code_git_sha or "unknown",
+        builder_entrypoint="eval_platform.indexes.milvus.run_milvus_ingest",
+        builder_params={
+            "primary_key_field": config.primary_key_field,
+            "vector_field": config.vector_field,
+            "row_builder": "chunk_embedding_to_milvus_row.v1",
+        },
+        schema=schema,
+        metric_type=config.metric_type,
+        index_type=index_type,
+        index_params=fingerprint_index_params,
+    )

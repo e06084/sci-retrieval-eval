@@ -9,8 +9,16 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from eval_platform.artifacts.manifest import ArtifactManifest
+from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_ASSET_FINGERPRINT,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
+)
 from eval_platform.artifacts.store import ArtifactIncompleteError, ArtifactStore
 from eval_platform.artifacts.types import RAW_DATASET_ARTIFACT_TYPE
+from eval_platform.assets import (
+    add_asset_fingerprint_metadata,
+    raw_dataset_fingerprint_components,
+)
 
 _SYSTEM_METADATA_KEYS = {
     "stage",
@@ -23,6 +31,8 @@ _SYSTEM_METADATA_KEYS = {
     "files",
     "content_fingerprint_sha256",
     "import_parameters",
+    METADATA_KEY_ASSET_FINGERPRINT,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
 }
 
 
@@ -103,6 +113,24 @@ def write_raw_dataset_artifact(
             "import_parameters": dict(snapshot.import_parameters),
         }
     )
+    add_asset_fingerprint_metadata(
+        manifest_metadata,
+        artifact_type=RAW_DATASET_ARTIFACT_TYPE,
+        components=raw_dataset_fingerprint_components(
+            dataset_name=snapshot.dataset_name,
+            raw_source_uri=snapshot.source_uri,
+            raw_format=str(snapshot.import_parameters.get("raw_format") or snapshot.source_type),
+            split=_optional_string(snapshot.import_parameters.get("split")),
+            file_fingerprints=[
+                {
+                    "path": file.path,
+                    "size_bytes": file.size_bytes,
+                    "sha256": file.sha256,
+                }
+                for file in sorted_files
+            ],
+        ),
+    )
 
     manifest = ArtifactManifest(
         artifact_id=artifact_id,
@@ -144,3 +172,9 @@ def read_raw_dataset_artifact(
         import_parameters=dict(manifest.metadata.get("import_parameters") or {}),
         metadata=snapshot_metadata,
     )
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)

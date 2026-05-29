@@ -7,6 +7,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
+from eval_platform.assets import (
+    add_asset_fingerprint_metadata,
+    manifest_asset_fingerprint_sha256,
+    metrics_run_fingerprint_components,
+)
 from eval_platform.datasets import (
     NORMALIZED_DATASET_ARTIFACT_TYPE,
     NormalizedDataset,
@@ -90,7 +95,7 @@ def run_metrics(
         config.output_artifact_id,
         data,
         queries_per_shard=config.queries_per_shard,
-        metadata=_build_manifest_metadata(config, data),
+        metadata=_build_manifest_metadata(config, data, source_store=source_store),
         dependencies=[
             ArtifactDependency(
                 artifact_type=NORMALIZED_DATASET_ARTIFACT_TYPE,
@@ -196,6 +201,8 @@ def build_metrics_run_data(
 def _build_manifest_metadata(
     config: MetricsRunConfig,
     data: MetricsRunData,
+    *,
+    source_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     metadata = dict(config.metadata)
     metadata.update(data.metadata)
@@ -211,4 +218,56 @@ def _build_manifest_metadata(
             "main_score_metric": data.main_score_metric,
         }
     )
+    add_asset_fingerprint_metadata(
+        metadata,
+        artifact_type="metrics_run",
+        components=_metrics_asset_fingerprint_components(
+            config,
+            source_store=source_store,
+        ),
+    )
     return metadata
+
+
+def _metrics_asset_fingerprint_components(
+    config: MetricsRunConfig,
+    *,
+    source_store: ArtifactStore | None,
+) -> dict[str, Any] | None:
+    if source_store is None:
+        return None
+    try:
+        normalized_manifest = source_store.read_manifest(
+            NORMALIZED_DATASET_ARTIFACT_TYPE,
+            config.source_normalized_dataset_artifact_id,
+        )
+        retrieval_manifest = source_store.read_manifest(
+            RETRIEVAL_RUN_ARTIFACT_TYPE,
+            config.source_retrieval_run_artifact_id,
+        )
+    except Exception:
+        return None
+
+    normalized_fingerprint = manifest_asset_fingerprint_sha256(normalized_manifest)
+    retrieval_fingerprint = manifest_asset_fingerprint_sha256(retrieval_manifest)
+    if normalized_fingerprint is None or retrieval_fingerprint is None:
+        return None
+
+    return metrics_run_fingerprint_components(
+        normalized_dataset_fingerprint=normalized_fingerprint,
+        retrieval_run_fingerprint=retrieval_fingerprint,
+        metrics_source="sci-retrieval-eval",
+        code_git_commit=config.code_git_sha or "unknown",
+        metrics_entrypoint="eval_platform.metrics.runner.run_metrics",
+        metric_params={
+            "k_values": config.k_values,
+            "main_metric": MAIN_SCORE_METRIC,
+            "projection": {
+                "from": "chunk",
+                "to": "doc",
+                "dedupe_policy": config.doc_aggregation,
+                "score": config.doc_score,
+            },
+            "missing_query_policy": "zero",
+        },
+    )

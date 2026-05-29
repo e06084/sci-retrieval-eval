@@ -16,8 +16,13 @@ from eval_platform.artifacts import (
     ArtifactManifest,
     ArtifactStore,
 )
-from eval_platform.artifacts.metadata_keys import METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID
+from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_ASSET_FINGERPRINT,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
+    METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID,
+)
 from eval_platform.artifacts.types import EMBEDDINGS_ARTIFACT_TYPE
+from eval_platform.assets import add_asset_fingerprint_metadata, embeddings_fingerprint_components
 from eval_platform.embeddings.jsonl import (
     VECTOR_DTYPE,
     VECTOR_ENCODING,
@@ -40,6 +45,8 @@ _SYSTEM_METADATA_FIELDS = {
     "alignment_order",
     "sharding",
     "shards",
+    METADATA_KEY_ASSET_FINGERPRINT,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
 }
 
 
@@ -237,6 +244,14 @@ def write_embedding_shards_artifact(
             "shards": shard_metadata if sharded_output else [],
         }
     )
+    add_asset_fingerprint_metadata(
+        manifest_metadata,
+        artifact_type=EMBEDDINGS_ARTIFACT_TYPE,
+        components=_embeddings_asset_fingerprint_components(
+            manifest_metadata,
+            provenance,
+        ),
+    )
 
     dependencies: list[ArtifactDependency] = []
     if source_artifact_id is not None:
@@ -343,4 +358,39 @@ def read_embeddings_artifact(
     return EmbeddedCorpus(
         embeddings=embeddings,
         metadata=corpus_metadata,
+    )
+
+
+def _embeddings_asset_fingerprint_components(
+    metadata: dict[str, Any],
+    provenance: EmbeddingProvenance,
+) -> dict[str, Any] | None:
+    chunked_fingerprint = metadata.get("chunked_corpus_fingerprint")
+    if not isinstance(chunked_fingerprint, str) or not chunked_fingerprint.strip():
+        return None
+
+    call_params = provenance.metadata.get("call_params")
+    if not isinstance(call_params, dict):
+        call_params = {}
+
+    endpoint_alias = provenance.endpoint_id
+    if endpoint_alias is None and provenance.endpoint_ids:
+        endpoint_alias = ",".join(provenance.endpoint_ids)
+
+    model_revision = provenance.metadata.get("model_revision")
+    if model_revision is not None:
+        model_revision = str(model_revision)
+
+    return embeddings_fingerprint_components(
+        chunked_corpus_fingerprint=chunked_fingerprint,
+        embedding_source=provenance.provider or "unknown",
+        model_name=provenance.model_name,
+        model_revision=model_revision,
+        embedding_dim=provenance.embedding_dim,
+        endpoint_alias=endpoint_alias,
+        api_version=provenance.api_version,
+        input_field="text",
+        call_params=call_params,
+        normalized=provenance.normalized,
+        storage_type=VECTOR_ENCODING,
     )
