@@ -14,8 +14,16 @@ from eval_platform.artifacts.manifest import (
     ArtifactFile,
     ArtifactManifest,
 )
+from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_ASSET_FINGERPRINT,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
+)
 from eval_platform.artifacts.store import ArtifactIncompleteError, ArtifactStore
 from eval_platform.artifacts.types import CHUNKED_CORPUS_ARTIFACT_TYPE
+from eval_platform.assets import (
+    add_asset_fingerprint_metadata,
+    chunked_corpus_fingerprint_components,
+)
 from eval_platform.chunking.jsonl import dump_chunks_jsonl, load_chunks_jsonl
 from eval_platform.chunking.schema import ChunkedCorpus, ChunkerProvenance, ChunkRecord
 
@@ -28,6 +36,8 @@ _SYSTEM_METADATA_FIELDS = {
     "chunk_params",
     "sharding",
     "shards",
+    METADATA_KEY_ASSET_FINGERPRINT,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
 }
 
 
@@ -264,6 +274,15 @@ def write_chunked_corpus_artifact(
             "shards": shard_metadata if file_record_num is not None else [],
         }
     )
+    add_asset_fingerprint_metadata(
+        manifest_metadata,
+        artifact_type=CHUNKED_CORPUS_ARTIFACT_TYPE,
+        components=_chunked_corpus_asset_fingerprint_components(
+            manifest_metadata,
+            chunker,
+            chunk_params,
+        ),
+    )
 
     manifest = ArtifactManifest(
         artifact_id=artifact_id,
@@ -302,3 +321,36 @@ def read_chunked_corpus_artifact(
         chunks=chunks,
         metadata=_read_user_corpus_metadata(manifest),
     )
+
+
+def _chunked_corpus_asset_fingerprint_components(
+    metadata: dict[str, Any],
+    chunker: ChunkerProvenance | None,
+    chunk_params: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    normalized_fingerprint = metadata.get("normalized_dataset_fingerprint")
+    if not (
+        isinstance(normalized_fingerprint, str)
+        and normalized_fingerprint.strip()
+        and chunker is not None
+        and chunker.repo_url is not None
+        and chunker.repo_url.strip()
+    ):
+        return None
+
+    return chunked_corpus_fingerprint_components(
+        normalized_dataset_fingerprint=normalized_fingerprint,
+        chunker_source=str(metadata.get("chunker_source") or "external_git"),
+        chunker_name=chunker.name,
+        source_git_remote_url=chunker.repo_url,
+        git_commit=chunker.commit_sha,
+        chunker_entrypoint=_optional_string(metadata.get("chunker_entrypoint")),
+        chunk_params=chunk_params or {},
+        schema_version=str(metadata.get("chunked_corpus_schema_version") or "1"),
+    )
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)

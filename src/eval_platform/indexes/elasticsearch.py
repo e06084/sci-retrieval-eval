@@ -19,6 +19,11 @@ from eval_platform.artifacts.metadata_keys import (
     METADATA_KEY_SOURCE_CHUNKED_CORPUS_ARTIFACT_ID,
 )
 from eval_platform.artifacts.types import ELASTICSEARCH_INDEX_ARTIFACT_TYPE
+from eval_platform.assets import (
+    add_asset_fingerprint_metadata,
+    elasticsearch_index_fingerprint_components,
+    manifest_asset_fingerprint_sha256,
+)
 from eval_platform.chunking import CHUNKED_CORPUS_ARTIFACT_TYPE, ChunkRecord, iter_chunk_shards
 from eval_platform.chunking.progress import ProgressReporter, report_progress
 
@@ -497,6 +502,19 @@ def run_elasticsearch_ingest(
             "shards": shard_metadata,
         }
     )
+    source_manifest = source_store.read_manifest(
+        CHUNKED_CORPUS_ARTIFACT_TYPE,
+        config.source_artifact_id,
+    )
+    add_asset_fingerprint_metadata(
+        manifest_metadata,
+        artifact_type=ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
+        components=_elasticsearch_asset_fingerprint_components(
+            config=config,
+            source_fingerprint=manifest_asset_fingerprint_sha256(source_manifest),
+            mapping=mapping,
+        ),
+    )
 
     manifest = ArtifactManifest(
         artifact_id=config.output_artifact_id,
@@ -523,3 +541,27 @@ def run_elasticsearch_ingest(
         config.output_artifact_id,
     )
     return manifest
+
+
+def _elasticsearch_asset_fingerprint_components(
+    *,
+    config: ElasticsearchIngestConfig,
+    source_fingerprint: str | None,
+    mapping: dict[str, Any],
+) -> dict[str, Any] | None:
+    if source_fingerprint is None:
+        return None
+
+    return elasticsearch_index_fingerprint_components(
+        chunked_corpus_fingerprint=source_fingerprint,
+        builder_source="sci-retrieval-eval",
+        code_git_commit=config.code_git_sha or "unknown",
+        builder_entrypoint="eval_platform.indexes.elasticsearch.run_elasticsearch_ingest",
+        builder_params={
+            "document_id_field": DOCUMENT_ID_FIELD,
+            "document_builder": "chunk_to_elasticsearch_document.v1",
+        },
+        mapping=dict(mapping.get("mappings", mapping)),
+        settings=dict(mapping.get("settings", {})),
+        ingest_params={},
+    )

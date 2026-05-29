@@ -8,6 +8,7 @@ from typing import Any, NoReturn
 from pydantic import BaseModel, Field, ValidationError, ValidationInfo, field_validator
 
 from eval_platform.artifacts import EMBEDDINGS_ARTIFACT_TYPE, ArtifactManifest, ArtifactStore
+from eval_platform.assets import manifest_asset_fingerprint_sha256
 from eval_platform.chunking import CHUNKED_CORPUS_ARTIFACT_TYPE
 from eval_platform.chunking.artifact import ChunkShard, iter_chunk_shards
 from eval_platform.chunking.progress import ProgressReporter, report_progress
@@ -347,6 +348,7 @@ def run_embedding(
     manifest_metadata.update(config.metadata)
     manifest_metadata.update(
         {
+            "chunked_corpus_fingerprint": manifest_asset_fingerprint_sha256(source_manifest),
             "resume_existing_shards": config.resume_existing_shards,
             "resumed_shard_count": 0,
             "computed_shard_count": 0,

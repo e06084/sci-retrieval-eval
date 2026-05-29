@@ -4,75 +4,67 @@
 
 ## 1. 任务信息
 
-- 任务名：`Track B1 验收返工 / asset fingerprint 语义修正`
-- 当前分支：`feat/asset-fingerprint-spec`
-- 对应指令文件：`TASK.md`
-- 返工基线：`origin/feat/asset-fingerprint-spec` / `ecd6b33 Update asset fingerprint report`
-- 返工完成时间：2026-05-30
-- 返工实现提交 SHA：`6db94aee5d37fd2d23412c38198a9c21625cd98f`
-- 报告提交 SHA：本报告提交后由 `git log -1 --oneline` 确认；提交内容无法自引用自身 SHA
+- 任务名：`PR2 / artifact writer 接入 asset_fingerprint`
+- 当前分支：`feat/artifact-fingerprint-writers`
+- 基线：`origin/main` / `268cfbc Add asset fingerprint foundations (#39)`
+- 完成时间：2026-05-30
 
-## 2. 本轮返工内容
+## 2. 本轮实现
 
-本轮仍只覆盖 B1 fingerprint schema/helper/spec/docs/tests，不接入 artifact writer，不改变
-planner / runner 行为。
+本轮把 #39 中定义的 fingerprint schema/helper 接入 artifact manifest 写入路径。
 
-已修复：
+新增：
 
-- `src/eval_platform/assets/fingerprint.py`
-  - 扩展运行实例字段 guard：`run_id`、`artifact_id`、`created_at`、`updated_at`、
-    `started_at`、`completed_at`、`timestamp`、`created_time`、`updated_time`、
-    `request_id`、`trace_file`、`trace_path` 等不允许进入 fingerprint payload。
-  - 新增物理资源字段 guard，用于自由参数字典，拒绝 `index_name`、`collection_name`、
-    `endpoint_url`、`url`、`uri`、`host`、`port`，以及 `_url` / `_uri` / `_host` /
-    `_port` 后缀字段。
-  - 保留稳定身份字段例外：`raw_source_uri`、`source_git_remote_url`、`endpoint_alias`。
-  - `file_fingerprints` 在 raw dataset builder 中按 `path`、`sha256`、`size_bytes`
-    canonical sort，避免对象存储 listing 顺序影响 raw dataset fingerprint。
-- `tests/assets/test_fingerprint.py`
-  - 新增 raw file listing 顺序不影响 fingerprint 的测试。
-  - 新增 `path` / `sha256` / `size_bytes` 变化会改变 raw dataset fingerprint 的测试。
-  - 新增自由参数字典拒绝物理资源名、真实 URL/URI、host/port、request id、trace path、
-    timestamp 字段的测试。
-  - 补齐 secret fragments：`api_key`、`access_key`、`secret`、`password`、`token`、
-    `authorization`。
-- `docs/decisions/0023-asset-fingerprint-spec.md`
-  - 明确物理资源名、真实服务地址、request id、trace path、时间戳不进入 fingerprint。
-  - 明确 `raw_source_uri`、`source_git_remote_url`、`endpoint_alias` 的允许边界。
-  - 明确 `file_fingerprints` 是集合语义并 canonical sort。
-- `docs/architecture.md`
-  - 同步资产身份和等价性边界。
-- `docs/operations/experiment_variants.md`
-  - 同步实验变体和后续复用规划的参数边界。
+- `src/eval_platform/assets/manifest.py`
+  - `asset_fingerprint_metadata(...)`
+  - `add_asset_fingerprint_metadata(...)`
+  - `manifest_asset_fingerprint_sha256(...)`
+  - `require_manifest_asset_fingerprint_sha256(...)`
+  - `strip_asset_fingerprint_metadata(...)`
+- manifest metadata key：
+  - `asset_fingerprint`
+  - `asset_fingerprint_sha256`
 
-## 3. Guard 语义
+已接入的 artifact：
 
-`canonical_json_hash(...)` 使用 canonical JSON：
+- `raw_dataset`
+- `normalized_dataset`
+- `chunked_corpus`
+- `embeddings`
+- `elasticsearch_index`
+- `milvus_collection`
+- `retrieval_run`
+- `metrics_run`
 
-```text
-sort_keys=True
-ensure_ascii=False
-separators=(",", ":")
-allow_nan=False
-```
+语义边界：
 
-并拒绝：
+- writer/runner 在语义字段足够时写入 `metadata.asset_fingerprint` 和
+  `metadata.asset_fingerprint_sha256`。
+- runner 能读上游 manifest 时，使用上游 `asset_fingerprint_sha256` 作为依赖身份。
+- 低层 writer 如果缺少必要语义字段，不强造 fingerprint，避免写入错误身份。
+- `index_name`、`collection_name`、真实服务 URL、时间戳、`artifact_id`、`run_id`
+  不进入 fingerprint。
 
-- 非 JSON-serializable value。
-- 非 string dict key。
-- secret-like key。
-- 运行实例身份和 timestamp 字段。
+## 3. 测试覆盖
 
-各 stage component builder 会在自由参数字典中额外拒绝物理连接信息。ES URL、Milvus URI、
-ES index name、Milvus collection name 应记录在 artifact manifest metadata 或运行配置中，
-不参与逻辑资产等价判断。
+新增：
+
+- `tests/assets/test_manifest_fingerprints.py`
+
+覆盖：
+
+- `raw_dataset` 的 fingerprint 不受 artifact id / created_at 影响。
+- `normalized_dataset`、`chunked_corpus`、`embeddings` manifest 写入 fingerprint。
+- `retrieval_run` fingerprint 使用 normalized / ES / Milvus 逻辑资产身份，不受
+  `index_name` / `collection_name` 变化影响。
+- `metrics_run` fingerprint 使用 normalized dataset fingerprint 与 retrieval run fingerprint。
 
 ## 4. 验证结果
 
 已运行：
 
 ```bash
-PYTHONPATH=src pytest tests/assets/test_fingerprint.py
+PYTHONPATH=src pytest tests/assets/test_manifest_fingerprints.py
 PYTHONPATH=src pytest
 ruff check .
 mypy .
@@ -80,39 +72,23 @@ mypy .
 
 结果：
 
-- `PYTHONPATH=src pytest tests/assets/test_fingerprint.py`
-  - `71 passed in 0.16s`
+- `PYTHONPATH=src pytest tests/assets/test_manifest_fingerprints.py`
+  - `3 passed`
 - `PYTHONPATH=src pytest`
-  - `683 passed in 1.91s`
+  - `686 passed`
 - `ruff check .`
   - `All checks passed!`
 - `mypy .`
-  - `Success: no issues found in 175 source files`
+  - `Success: no issues found in 177 source files`
 
-## 5. 外部服务访问
+## 5. 未实现项
 
-- 是否访问真实 S3：`no`
-- 是否访问真实 ES：`no`
-- 是否访问真实 Milvus：`no`
-- 是否访问真实 embedding：`no`
-- 是否访问真实 rerank：`no`
-- 是否访问真实 rewrite：`no`
+按 PR2 范围，本轮未实现：
 
-## 6. 未实现项
-
-按 B1 / PR1 范围，本轮未实现：
-
-- artifact writer 接入 `asset_fingerprint`。
-- planner 行为变更。
-- minimal rebuild planner。
-- stage override。
-- pinned artifacts。
+- planner/reuse 使用 fingerprint 做复用判断。
+- minimal rebuild planning。
+- stage override / pinned artifacts。
 - benchmark_run / benchmark_suite_run fingerprint。
-- benchmark variant spec。
-- 真实外部服务运行。
+- 真实五数据集资产重建。
 
-## 7. 后续建议
-
-PR2：各 artifact writer / runner 将 `asset_fingerprint` 写入 manifest metadata。
-PR3：reuse planner 增加 `complete + artifact_type + dependency-compatible chain + fingerprint match` 联合校验。
-PR4：minimal rebuild planning、stage override、pinned artifacts 和 variant spec。
+下一步是 PR3：让 corpus asset reuse planner 使用 `asset_fingerprint_sha256` 做复用校验。
