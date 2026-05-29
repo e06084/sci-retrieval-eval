@@ -136,3 +136,81 @@ retrieval 执行和 metrics 计算必须分离：
 - `docs/operations/*.md`：真实环境运行手册，按需要阅读。
 - `TASK.md`：当前任务单，本地 ignored，不进 git。
 - `report.md`：开发 session 的交付报告，随 PR 提交。
+
+## 10. Asset identity and equivalence
+
+Artifact id 不是资产身份。当前部分 artifact id、Elasticsearch index name、Milvus
+collection name 会带有 `run_id`，这些名称用于区分一次构建或一次运行产生的物理
+artifact / 外部资源，不代表资产的逻辑等价身份。
+
+Artifact dependency 只能证明 lineage：某个 artifact 是沿着哪条上游链路产生的。
+Lineage 可以避免混用不同链条的 artifacts，但不能单独证明两个 artifacts 在逻辑上
+等价。资产等价必须由 `asset_fingerprint` 判断。
+
+`asset_fingerprint` 是由稳定、可审计、与运行实例无关的 components 计算出的 canonical
+sha256。它必须排除：
+
+- `run_id`
+- `artifact_id`
+- `created_at` / `updated_at` / `started_at` / `completed_at` / timestamp 等时间字段
+- `created_by`
+- API key、access key、token、password、Authorization header 等 secrets
+- ES index name、Milvus collection name 等物理资源名
+- 真实服务地址或连接字段，例如 `endpoint_url`、`url`、`uri`、`host`、`port`
+- request id、trace file/path 等运行实例输出
+
+它可以包含：
+
+- artifact type
+- 上游资产 fingerprint
+- dataset name、`raw_source_uri`、raw file fingerprints
+- normalizer name / version / params
+- chunker source / name / `source_git_remote_url` / commit / entrypoint / params / schema version
+- embedding source / model / revision / endpoint alias / dim / call params / normalized / storage type
+- Elasticsearch builder provenance / mapping / settings / ingest params
+- Milvus builder provenance / schema / metric / index type / index params
+- retrieval query source / query embedding / search params / rewrite / rerank / trace mode
+- metrics source / code commit / entrypoint / metric params
+
+`raw_source_uri` 和 `source_git_remote_url` 是稳定内容 / 源码身份字段，不等同于真实服务
+连接地址。自由参数字典如 `builder_params`、`ingest_params`、`search_params`、
+`query_embedding`、`rewrite`、`rerank`、`call_params` 不应携带 `index_name`、
+`collection_name`、真实 endpoint URL、host/port、request id 或 trace path。
+`file_fingerprints` 按 canonical order 计算，表达文件集合语义，不受对象存储 listing
+顺序影响。
+
+后续 planner 判断复用时，至少需要同时满足：
+
+- artifact 已 complete，包含 manifest 和 `_SUCCESS`。
+- artifact type 匹配当前需要的 stage。
+- dependency-compatible chain 与当前需要的上游链路兼容。
+- `asset_fingerprint` 匹配当前需要的逻辑资产。
+
+最小重算语义示例：
+
+- 只改变 rerank 配置：复用 corpus、embedding、ES、Milvus；重跑 retrieval、metrics、benchmark。
+- 只改变 embedding model：复用 raw / normalized / chunked corpus / ES；重建 embeddings
+  和 Milvus collection；重跑 retrieval、metrics、benchmark。
+- 改变 chunk params：复用 raw / normalized；重建 chunked corpus、embeddings、ES、Milvus；
+  重跑 retrieval、metrics、benchmark。
+- 只改变 metric params：复用 corpus、index 和 retrieval_run；只重跑 metrics、benchmark。
+
+当前主线仍保留既有 artifact id 和 dependency resolution 行为。本节定义的是后续资产
+复用和最小重算规划所需的身份语义，不要求现有 planner 在同一 PR 内改为按 fingerprint
+决策。
+
+当前 fingerprint 等价范围覆盖 8 类核心资产：
+
+```text
+raw_dataset
+normalized_dataset
+chunked_corpus
+embeddings
+elasticsearch_index
+milvus_collection
+retrieval_run
+metrics_run
+```
+
+`benchmark_run` 和 `benchmark_suite_run` 暂不做 fingerprint 等价判断；它们是低成本的
+编排 / 汇总 artifact，复用收益不如底层资产显著。

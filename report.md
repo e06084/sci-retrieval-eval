@@ -4,121 +4,92 @@
 
 ## 1. 任务信息
 
-- 任务名：`embedding shard 断点恢复 + HTTP retry`
-- 当前分支：`feat/embedding-shard-resume-retry`
+- 任务名：`Track B1 验收返工 / asset fingerprint 语义修正`
+- 当前分支：`feat/asset-fingerprint-spec`
 - 对应指令文件：`TASK.md`
-- 开始时间：2026-05-28
-- 完成时间：2026-05-28
-- 基线：`main` / `e799477 Add benchmark suite query limit runbook (#36)`
-- 实现提交 SHA：`4dceefc3aaf9ec6e8d3b51d864c9088d37088fb8`
-- 报告提交 SHA：本报告单独提交后由 `git log -1 --oneline` 确认；提交内容无法自引用自身 SHA。
+- 返工基线：`origin/feat/asset-fingerprint-spec` / `ecd6b33 Update asset fingerprint report`
+- 返工完成时间：2026-05-30
+- 返工实现提交 SHA：`6db94aee5d37fd2d23412c38198a9c21625cd98f`
+- 报告提交 SHA：本报告提交后由 `git log -1 --oneline` 确认；提交内容无法自引用自身 SHA
 
-## 2. 断点恢复策略
+## 2. 本轮返工内容
 
-本轮在 `EmbeddingRunConfig` 增加：
+本轮仍只覆盖 B1 fingerprint schema/helper/spec/docs/tests，不接入 artifact writer，不改变
+planner / runner 行为。
 
-```text
-resume_existing_shards: bool = True
-```
+已修复：
 
-默认开启。`run_embedding(...)` 逐个 source chunk shard 处理时，会先按当前 `output_artifact_id` 和 source shard 对齐规则查找已有 embedding shard 文件：
+- `src/eval_platform/assets/fingerprint.py`
+  - 扩展运行实例字段 guard：`run_id`、`artifact_id`、`created_at`、`updated_at`、
+    `started_at`、`completed_at`、`timestamp`、`created_time`、`updated_time`、
+    `request_id`、`trace_file`、`trace_path` 等不允许进入 fingerprint payload。
+  - 新增物理资源字段 guard，用于自由参数字典，拒绝 `index_name`、`collection_name`、
+    `endpoint_url`、`url`、`uri`、`host`、`port`，以及 `_url` / `_uri` / `_host` /
+    `_port` 后缀字段。
+  - 保留稳定身份字段例外：`raw_source_uri`、`source_git_remote_url`、`endpoint_alias`。
+  - `file_fingerprints` 在 raw dataset builder 中按 `path`、`sha256`、`size_bytes`
+    canonical sort，避免对象存储 listing 顺序影响 raw dataset fingerprint。
+- `tests/assets/test_fingerprint.py`
+  - 新增 raw file listing 顺序不影响 fingerprint 的测试。
+  - 新增 `path` / `sha256` / `size_bytes` 变化会改变 raw dataset fingerprint 的测试。
+  - 新增自由参数字典拒绝物理资源名、真实 URL/URI、host/port、request id、trace path、
+    timestamp 字段的测试。
+  - 补齐 secret fragments：`api_key`、`access_key`、`secret`、`password`、`token`、
+    `authorization`。
+- `docs/decisions/0023-asset-fingerprint-spec.md`
+  - 明确物理资源名、真实服务地址、request id、trace path、时间戳不进入 fingerprint。
+  - 明确 `raw_source_uri`、`source_git_remote_url`、`endpoint_alias` 的允许边界。
+  - 明确 `file_fingerprints` 是集合语义并 canonical sort。
+- `docs/architecture.md`
+  - 同步资产身份和等价性边界。
+- `docs/operations/experiment_variants.md`
+  - 同步实验变体和后续复用规划的参数边界。
 
-- 非分片旧路径：`embeddings.jsonl`
-- 分片路径：`embeddings/<source_shard_id>.jsonl`
+## 3. Guard 语义
 
-只有当前输出 artifact 下存在对应 shard 文件时才尝试复用。复用前逐 shard 校验：
-
-- JSONL 可解析为 `EmbeddingRecord`
-- embedding row 数量等于 source chunk shard 的 chunk 数量
-- `chunk_id` 顺序与 source chunk shard 完全一致
-- `doc_id` 顺序与 source chunk shard 完全一致
-- 每条 vector 维度等于 `config.embedding_dim`
-
-任一校验失败会抛 `EmbeddingRunError`，错误信息包含 shard id 和原因；不会写 `_SUCCESS`，也不会静默覆盖错误 shard。校验通过时不调用 embedding client，直接把该 shard 纳入最终 artifact。
-
-最终 manifest metadata 新增：
-
-```text
-resume_existing_shards
-resumed_shard_count
-computed_shard_count
-```
-
-`files`、`metadata["shards"]`、`embedding_count`、`unique_chunk_count`、`unique_doc_count` 都由复用 shard 和新计算 shard 的全量结果统一生成。只有全部 shard 完成后才写 manifest 和 `_SUCCESS`。实现保持 shard 级读取和校验，没有全量加载 chunk 或 embedding corpus。
-
-`resume_existing_shards=False` 时保持旧行为：即使已有 shard 文件，也重新调用 embedding client 计算并写出。
-
-## 3. HTTP retry 策略
-
-本轮在 `HTTPEmbeddingClientConfig` 增加：
+`canonical_json_hash(...)` 使用 canonical JSON：
 
 ```text
-max_retries: int = 0
-retry_backoff_seconds: float = 0.0
+sort_keys=True
+ensure_ascii=False
+separators=(",", ":")
+allow_nan=False
 ```
 
-retry 粒度是单个 HTTP batch，默认 `max_retries=0` 不重试。
+并拒绝：
 
-会重试：
+- 非 JSON-serializable value。
+- 非 string dict key。
+- secret-like key。
+- 运行实例身份和 timestamp 字段。
 
-- `OSError`，覆盖 `TimeoutError` / `socket.timeout` / `urllib.error.URLError` 等网络或读响应失败
-- HTTP `429`
-- HTTP `5xx`
+各 stage component builder 会在自由参数字典中额外拒绝物理连接信息。ES URL、Milvus URI、
+ES index name、Milvus collection name 应记录在 artifact manifest metadata 或运行配置中，
+不参与逻辑资产等价判断。
 
-不会重试：
-
-- 非 `429` 的 `4xx`
-- invalid JSON
-- 返回向量数量不一致
-- 空 vector、非数值、非有限数值等确定性响应错误
-
-重试耗尽后抛 `EmbeddingClientError`，错误信息包含 attempts 和 `max_retries`。
-
-## 4. 新增测试
-
-更新：
-
-- `tests/embeddings/test_runner.py`
-  - 已存在且校验通过的 shard 会被复用，client 不收到该 shard 文本
-  - 复用后 artifact complete，manifest 包含复用 shard 和新计算 shard，统计数量正确
-  - `chunk_id` 顺序不匹配时失败且不写 `_SUCCESS`
-  - `doc_id` 不匹配时失败且不写 `_SUCCESS`
-  - vector dim 不匹配时失败且不写 `_SUCCESS`
-  - `resume_existing_shards=False` 时已有 shard 会重新计算
-- `tests/embeddings/test_client.py`
-  - `TimeoutError` / `OSError` 按配置重试并最终成功
-  - 网络错误重试耗尽后抛 `EmbeddingClientError`
-  - HTTP `429` / `5xx` 按配置重试
-  - 非 `429` 的 `4xx` 不重试
-  - retry 配置拒绝负数
-
-## 5. 验证命令和结果
+## 4. 验证结果
 
 已运行：
 
 ```bash
-pytest tests/embeddings
-pytest
+PYTHONPATH=src pytest tests/assets/test_fingerprint.py
+PYTHONPATH=src pytest
 ruff check .
 mypy .
-mypy src tests
 ```
 
 结果：
 
-- `pytest tests/embeddings`
-  - `124 passed in 0.23s`
-- `pytest`
-  - `612 passed in 2.62s`
+- `PYTHONPATH=src pytest tests/assets/test_fingerprint.py`
+  - `71 passed in 0.16s`
+- `PYTHONPATH=src pytest`
+  - `683 passed in 1.91s`
 - `ruff check .`
   - `All checks passed!`
 - `mypy .`
-  - 未通过，原因是当前工作区存在未跟踪实验脚本 `scripts/build_e1_e4_corpus_assets.py`，该文件不属于本任务、不在 git 跟踪范围、不提交。
-  - 报错：`scripts/build_e1_e4_corpus_assets.py:569: error: Value of type variable "SupportsRichComparisonT" of "sorted" cannot be "str | None"  [type-var]`
-- `mypy src tests`
-  - `Success: no issues found in 168 source files`
+  - `Success: no issues found in 175 source files`
 
-## 6. 外部服务访问
+## 5. 外部服务访问
 
 - 是否访问真实 S3：`no`
 - 是否访问真实 ES：`no`
@@ -126,19 +97,22 @@ mypy src tests
 - 是否访问真实 embedding：`no`
 - 是否访问真实 rerank：`no`
 - 是否访问真实 rewrite：`no`
-- 是否读取真实 `config.yaml`：`no`
 
-本轮只使用本地 fake client、fake transport 和本地 artifact store 测试。
+## 6. 未实现项
 
-## 7. 已知限制和后续建议
+按 B1 / PR1 范围，本轮未实现：
 
-- retry backoff 是固定 sleep，没有引入 jitter 或指数退避；本轮按最小可靠性增强处理。
-- retry 仍为单 batch 串行执行，没有实现并发 embedding。
-- `mypy .` 在当前工作区受未跟踪实验脚本影响；本 PR 的 tracked 源码和测试通过 `mypy src tests`。
-- 合回 `main` 后，建议调度 session 使用真实 `IFIRScifact` partial embedding artifact 做只读恢复验证，重点确认 `resumed_shard_count`、`computed_shard_count`、最终 `_MANIFEST.json` 和 `_SUCCESS`。
+- artifact writer 接入 `asset_fingerprint`。
+- planner 行为变更。
+- minimal rebuild planner。
+- stage override。
+- pinned artifacts。
+- benchmark_run / benchmark_suite_run fingerprint。
+- benchmark variant spec。
+- 真实外部服务运行。
 
-## 8. 交付结论
+## 7. 后续建议
 
-- 是否建议验收：`yes`
-- 是否建议合并：`yes`
-- 如果不能合并，卡点是什么：无
+PR2：各 artifact writer / runner 将 `asset_fingerprint` 写入 manifest metadata。
+PR3：reuse planner 增加 `complete + artifact_type + dependency-compatible chain + fingerprint match` 联合校验。
+PR4：minimal rebuild planning、stage override、pinned artifacts 和 variant spec。
