@@ -7,6 +7,7 @@ from typing import Any
 
 from eval_platform.artifacts import ArtifactManifest, ArtifactStore
 from eval_platform.artifacts.metadata_keys import (
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
     METADATA_KEY_CHUNKED_CORPUS_ARTIFACT_ID,
     METADATA_KEY_COLLECTION_NAME,
     METADATA_KEY_EMBEDDINGS_ARTIFACT_ID,
@@ -39,6 +40,7 @@ _MANIFEST_SUMMARY_KEYS = {
     "unique_chunk_count",
     "unique_doc_count",
     "embedding_dim",
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
     "source_artifact_id",
     METADATA_KEY_RAW_DATASET_ARTIFACT_ID,
     METADATA_KEY_SOURCE_NORMALIZED_DATASET_ARTIFACT_ID,
