@@ -4,91 +4,82 @@
 
 ## 1. 任务信息
 
-- 任务名：`PR2 / artifact writer 接入 asset_fingerprint`
-- 当前分支：`feat/artifact-fingerprint-writers`
-- 基线：`origin/main` / `268cfbc Add asset fingerprint foundations (#39)`
+- 任务名：`PR3 / corpus asset reuse planner 使用 asset_fingerprint`
+- 当前分支：`feat/corpus-asset-fingerprint-reuse`
+- 基线：`feat/artifact-fingerprint-writers`，且 PR #40 已合入 `main`
 - 完成时间：2026-05-30
 
 ## 2. 本轮实现
 
-本轮把 #39 中定义的 fingerprint schema/helper 接入 artifact manifest 写入路径。
+本轮让五数据集 corpus asset dry-run planner 能按逻辑资产 fingerprint 做复用过滤。
 
-新增：
+改动：
 
-- `src/eval_platform/assets/manifest.py`
-  - `asset_fingerprint_metadata(...)`
-  - `add_asset_fingerprint_metadata(...)`
-  - `manifest_asset_fingerprint_sha256(...)`
-  - `require_manifest_asset_fingerprint_sha256(...)`
-  - `strip_asset_fingerprint_metadata(...)`
-- manifest metadata key：
-  - `asset_fingerprint`
-  - `asset_fingerprint_sha256`
+- `inventory_corpus_assets(...)`
+  - manifest summary 增加 `asset_fingerprint_sha256`。
+- `build_plan_for_datasets(...)`
+  - 新增可选参数 `expected_asset_fingerprints_by_slug`。
+  - 当提供 expected fingerprint 时，只复用对应 artifact type 中
+    `metadata_summary.asset_fingerprint_sha256` 匹配的完整 artifact。
+  - 未提供 expected fingerprint 时，保持原有 dependency-chain reuse 行为。
+  - reused step 会暴露 `asset_fingerprint_sha256`，便于审计 dry-run 选择原因。
 
-已接入的 artifact：
+## 3. 行为语义
 
-- `raw_dataset`
-- `normalized_dataset`
-- `chunked_corpus`
-- `embeddings`
-- `elasticsearch_index`
-- `milvus_collection`
-- `retrieval_run`
-- `metrics_run`
+新增能力支持后续最小重建：
 
-语义边界：
+- 如果 raw / normalized / chunk / ES fingerprint 匹配，但 embedding fingerprint 变化：
+  - 复用 raw / normalized / chunk / ES。
+  - 重新创建 embeddings。
+  - 重新创建 Milvus collection。
+- 如果存在多个 embeddings 或 Milvus collection，planner 会优先选择 fingerprint 匹配且
+  dependency chain 一致的那条链。
+- 如果 expected fingerprint 指向的 artifact 不存在或旧 artifact 没有 fingerprint：
+  - 不复用该 artifact。
+  - planner 回退为 create 对应阶段和依赖它的下游阶段。
 
-- writer/runner 在语义字段足够时写入 `metadata.asset_fingerprint` 和
-  `metadata.asset_fingerprint_sha256`。
-- runner 能读上游 manifest 时，使用上游 `asset_fingerprint_sha256` 作为依赖身份。
-- 低层 writer 如果缺少必要语义字段，不强造 fingerprint，避免写入错误身份。
-- `index_name`、`collection_name`、真实服务 URL、时间戳、`artifact_id`、`run_id`
-  不进入 fingerprint。
+## 4. 测试覆盖
 
-## 3. 测试覆盖
+新增/更新：
 
-新增：
-
-- `tests/assets/test_manifest_fingerprints.py`
+- `tests/corpus_assets/test_planner.py`
 
 覆盖：
 
-- `raw_dataset` 的 fingerprint 不受 artifact id / created_at 影响。
-- `normalized_dataset`、`chunked_corpus`、`embeddings` manifest 写入 fingerprint。
-- `retrieval_run` fingerprint 使用 normalized / ES / Milvus 逻辑资产身份，不受
-  `index_name` / `collection_name` 变化影响。
-- `metrics_run` fingerprint 使用 normalized dataset fingerprint 与 retrieval run fingerprint。
+- expected fingerprint 能从同一 chunk chain 中选择目标 embeddings / Milvus。
+- embedding fingerprint 变化时，只复用 raw / normalized / chunk / ES，并重建
+  embeddings / Milvus。
+- 原有不传 expected fingerprint 的 reuse 行为保持不变。
 
-## 4. 验证结果
+## 5. 验证结果
 
 已运行：
 
 ```bash
-PYTHONPATH=src pytest tests/assets/test_manifest_fingerprints.py
-PYTHONPATH=src pytest
+PYTHONPATH=src pytest tests/corpus_assets/test_planner.py tests/corpus_assets/test_inventory.py tests/scripts/test_build_real_corpus_assets.py
+PYTHONPATH=src pytest tests/corpus_assets tests/scripts/test_build_real_corpus_assets.py tests/assets/test_manifest_fingerprints.py
 ruff check .
 mypy .
 ```
 
 结果：
 
-- `PYTHONPATH=src pytest tests/assets/test_manifest_fingerprints.py`
-  - `3 passed`
-- `PYTHONPATH=src pytest`
-  - `686 passed`
+- `tests/corpus_assets/test_planner.py tests/corpus_assets/test_inventory.py tests/scripts/test_build_real_corpus_assets.py`
+  - `16 passed`
+- `tests/corpus_assets tests/scripts/test_build_real_corpus_assets.py tests/assets/test_manifest_fingerprints.py`
+  - `25 passed`
 - `ruff check .`
   - `All checks passed!`
 - `mypy .`
   - `Success: no issues found in 177 source files`
 
-## 5. 未实现项
+## 6. 未实现项
 
-按 PR2 范围，本轮未实现：
+按 PR3 范围，本轮未实现：
 
-- planner/reuse 使用 fingerprint 做复用判断。
-- minimal rebuild planning。
+- expected fingerprint 的自动计算入口。
+- minimal rebuild execute runner。
 - stage override / pinned artifacts。
-- benchmark_run / benchmark_suite_run fingerprint。
 - 真实五数据集资产重建。
 
-下一步是 PR3：让 corpus asset reuse planner 使用 `asset_fingerprint_sha256` 做复用校验。
+下一步是把 PR3 合入后，用最新 `main` 重新生成 5 个 benchmark 的 corpus assets。

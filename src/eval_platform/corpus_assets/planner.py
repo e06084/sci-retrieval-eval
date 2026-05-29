@@ -6,6 +6,7 @@ from typing import Any
 
 from eval_platform.artifacts.metadata_keys import (
     DEPENDENCY_METADATA_KEYS_BY_ARTIFACT_TYPE,
+    METADATA_KEY_ASSET_FINGERPRINT_SHA256,
     METADATA_KEY_CHUNKED_CORPUS_ARTIFACT_ID,
     METADATA_KEY_COLLECTION_NAME,
     METADATA_KEY_EMBEDDINGS_ARTIFACT_ID,
@@ -40,6 +41,7 @@ def build_plan_for_datasets(
     raw_exists_by_slug: dict[str, bool],
     reuse_existing: bool = False,
     inventory: dict[str, Any] | None = None,
+    expected_asset_fingerprints_by_slug: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build a dry-run plan for corpus/index artifacts."""
 
@@ -50,6 +52,14 @@ def build_plan_for_datasets(
 
         generated_artifact_ids = artifact_ids_for_dataset(spec, run_id)
         complete_records = _complete_inventory_records(inventory, spec.task_name)
+        expected_asset_fingerprints = _expected_fingerprints_for_spec(
+            spec,
+            expected_asset_fingerprints_by_slug,
+        )
+        complete_records = _filter_records_by_expected_asset_fingerprints(
+            complete_records,
+            expected_asset_fingerprints,
+        )
         records_by_id = _records_by_id(complete_records)
         reuse_artifact_ids = (
             _resolve_reusable_artifact_chain(records_by_id)
@@ -87,6 +97,10 @@ def build_plan_for_datasets(
             }
             if source_artifact_id is not None:
                 step["source_artifact_id"] = source_artifact_id
+            if reused_record is not None:
+                asset_fingerprint = _record_asset_fingerprint_sha256(reused_record)
+                if asset_fingerprint is not None:
+                    step[METADATA_KEY_ASSET_FINGERPRINT_SHA256] = asset_fingerprint
             if artifact_type == RAW_DATASET_ARTIFACT_TYPE:
                 step["raw_source_uri"] = raw_prefix_uri(bucket, raw_prefix, spec)
             if artifact_type == ELASTICSEARCH_INDEX_ARTIFACT_TYPE:
@@ -148,6 +162,7 @@ def build_plan_for_datasets(
             "resolved_artifact_ids": resolved_artifact_ids,
             "generated_resource_names": generated_resource_names,
             "resolved_resource_names": resolved_resource_names,
+            "expected_asset_fingerprints": expected_asset_fingerprints,
             "elasticsearch_index_name": resolved_resource_names[
                 ELASTICSEARCH_INDEX_ARTIFACT_TYPE
             ],
@@ -194,6 +209,47 @@ def _records_by_id(
         }
         for artifact_type, records in records_by_type.items()
     }
+
+
+def _expected_fingerprints_for_spec(
+    spec: DatasetSpec,
+    expected_asset_fingerprints_by_slug: dict[str, dict[str, str]] | None,
+) -> dict[str, str]:
+    if expected_asset_fingerprints_by_slug is None:
+        return {}
+    return dict(
+        expected_asset_fingerprints_by_slug.get(spec.slug)
+        or expected_asset_fingerprints_by_slug.get(spec.task_name)
+        or {}
+    )
+
+
+def _filter_records_by_expected_asset_fingerprints(
+    records_by_type: dict[str, list[dict[str, Any]]],
+    expected_asset_fingerprints: dict[str, str],
+) -> dict[str, list[dict[str, Any]]]:
+    if not expected_asset_fingerprints:
+        return records_by_type
+    filtered: dict[str, list[dict[str, Any]]] = {}
+    for artifact_type, records in records_by_type.items():
+        expected = expected_asset_fingerprints.get(artifact_type)
+        if expected is None:
+            filtered[artifact_type] = records
+            continue
+        filtered[artifact_type] = [
+            record
+            for record in records
+            if _record_asset_fingerprint_sha256(record) == expected
+        ]
+    return filtered
+
+
+def _record_asset_fingerprint_sha256(record: dict[str, Any]) -> str | None:
+    metadata = record.get("metadata_summary", {})
+    value = metadata.get(METADATA_KEY_ASSET_FINGERPRINT_SHA256)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
 
 
 def _resolve_reusable_artifact_chain(
