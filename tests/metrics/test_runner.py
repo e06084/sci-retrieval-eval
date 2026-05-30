@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from eval_platform.artifacts import LocalArtifactStore
+from eval_platform.chunking.progress import ProgressEvent
 from eval_platform.datasets import (
     CorpusRecord,
     NormalizedDataset,
@@ -131,6 +132,28 @@ def test_run_metrics_computes_from_normalized_qrels_and_retrieval(
         ("normalized_dataset", "normalized-1"),
         ("retrieval_run", "retrieval-1"),
     ]
+
+
+def test_run_metrics_reports_query_progress(store: LocalArtifactStore) -> None:
+    events: list[ProgressEvent] = []
+
+    run_metrics(store, store, _config(), progress_reporter=events.append)
+
+    metrics_events = [event for event in events if event.stage == "metrics_run"]
+
+    assert [(event.current, event.total) for event in metrics_events] == [
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+    ]
+    assert [event.metadata.get("query_id") for event in metrics_events[1:]] == [
+        "q-1",
+        "q-2",
+        "q-3",
+    ]
+    assert metrics_events[2].metadata["failed_retrieval_query_count"] == 1
+    assert metrics_events[3].metadata["missing_result_query_count"] == 1
 
 
 def test_run_metrics_is_deterministic(store: LocalArtifactStore) -> None:

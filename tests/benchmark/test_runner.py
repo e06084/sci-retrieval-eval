@@ -15,6 +15,7 @@ from eval_platform.benchmark import (
     read_benchmark_run_artifact,
     run_benchmark,
 )
+from eval_platform.chunking.progress import ProgressEvent
 from eval_platform.datasets import (
     CorpusRecord,
     NormalizedDataset,
@@ -161,6 +162,32 @@ def test_run_benchmark_live_path_writes_summary_and_dependencies(
         ("retrieval_run", "retrieval-1"),
         ("metrics_run", "metrics-1"),
     ]
+
+
+def test_run_benchmark_reports_stage_and_child_progress(
+    store: LocalArtifactStore,
+) -> None:
+    events: list[ProgressEvent] = []
+
+    run_benchmark(
+        store,
+        store,
+        _benchmark_config(),
+        es_client=FakeElasticsearchClient(),
+        progress_reporter=events.append,
+    )
+
+    benchmark_events = [event for event in events if event.stage == "benchmark_run"]
+
+    assert [(event.current, event.total) for event in benchmark_events] == [
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+    ]
+    assert "retrieval_run" in {event.stage for event in events}
+    assert "metrics_run" in {event.stage for event in events}
+    assert benchmark_events[-1].metadata["main_score"] == 1.0
 
 
 def test_run_benchmark_replay_path_does_not_call_external_clients(

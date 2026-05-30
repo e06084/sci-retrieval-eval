@@ -12,6 +12,7 @@ from eval_platform.assets import (
     manifest_asset_fingerprint_sha256,
     metrics_run_fingerprint_components,
 )
+from eval_platform.chunking.progress import ProgressReporter, report_progress
 from eval_platform.datasets import (
     NORMALIZED_DATASET_ARTIFACT_TYPE,
     NormalizedDataset,
@@ -78,6 +79,8 @@ def run_metrics(
     source_store: ArtifactStore,
     output_store: ArtifactStore,
     config: MetricsRunConfig,
+    *,
+    progress_reporter: ProgressReporter | None = None,
 ) -> ArtifactManifest:
     """Compute metrics from normalized qrels and a retrieval_run artifact."""
 
@@ -89,7 +92,12 @@ def run_metrics(
         source_store,
         config.source_retrieval_run_artifact_id,
     )
-    data = build_metrics_run_data(dataset, retrieval_records, config)
+    data = build_metrics_run_data(
+        dataset,
+        retrieval_records,
+        config,
+        progress_reporter=progress_reporter,
+    )
     return write_metrics_run_artifact(
         output_store,
         config.output_artifact_id,
@@ -115,6 +123,8 @@ def build_metrics_run_data(
     dataset: NormalizedDataset,
     retrieval_records: list[RetrievalQueryResult],
     config: MetricsRunConfig,
+    *,
+    progress_reporter: ProgressReporter | None = None,
 ) -> MetricsRunData:
     qrels_by_query: dict[str, dict[str, float]] = {}
     all_qrel_query_ids: set[str] = set()
@@ -138,7 +148,18 @@ def build_metrics_run_data(
     missing_doc_id_hit_count = 0
     duplicate_doc_hit_count = 0
 
-    for query_id in sorted(positive_query_ids):
+    sorted_positive_query_ids = sorted(positive_query_ids)
+    total_queries = len(sorted_positive_query_ids)
+    report_progress(
+        progress_reporter,
+        stage="metrics_run",
+        current=0,
+        total=total_queries,
+        message="Starting metrics queries",
+        metadata=_progress_metadata(config),
+    )
+
+    for query_index, query_id in enumerate(sorted_positive_query_ids, start=1):
         relevant_docs = qrels_by_query[query_id]
         result = results_by_query.get(query_id)
         query_text = query_text_by_id.get(query_id, result.query_text if result else "")
@@ -174,6 +195,19 @@ def build_metrics_run_data(
                 projection_stats=stats,
             )
         )
+        report_progress(
+            progress_reporter,
+            stage="metrics_run",
+            current=query_index,
+            total=total_queries,
+            message="Computed query metrics",
+            metadata={
+                **_progress_metadata(config),
+                "query_id": query_id,
+                "missing_result_query_count": missing_result_query_count,
+                "failed_retrieval_query_count": failed_retrieval_query_count,
+            },
+        )
 
     aggregate = aggregate_query_metrics(
         [record.metrics for record in query_metrics],
@@ -196,6 +230,23 @@ def build_metrics_run_data(
         query_metrics=query_metrics,
         metadata=metadata,
     )
+
+
+def _progress_metadata(config: MetricsRunConfig) -> dict[str, Any]:
+    metadata = dict(config.metadata)
+    metadata.update(
+        {
+            "output_artifact_id": config.output_artifact_id,
+            "source_normalized_dataset_artifact_id": (
+                config.source_normalized_dataset_artifact_id
+            ),
+            "source_retrieval_run_artifact_id": config.source_retrieval_run_artifact_id,
+            "k_values": config.k_values,
+            "doc_aggregation": config.doc_aggregation,
+            "doc_score": config.doc_score,
+        }
+    )
+    return metadata
 
 
 def _build_manifest_metadata(

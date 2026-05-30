@@ -87,7 +87,25 @@ suite dependencies 指向 child benchmark_run
 - `metrics_run` summary 中 `main_score_metric` 和 `main_score` 非空。
 - `retrieval_run` record 在 baseline 中保留 replay trace。
 
-## 5. 本轮未实现内容
+## 5. 进度输出
+
+真实运行脚本必须显式传入 `progress_reporter`，建议按 JSONL 输出到 stdout 或 stderr，避免长时间看不到状态：
+
+```python
+def progress_reporter(event):
+    print(event.model_dump_json(), flush=True)
+
+run_benchmark_suite(..., progress_reporter=progress_reporter)
+```
+
+当前会输出：
+
+- `benchmark_suite_run`: suite 开始、每个 dataset x setting item 开始/完成。
+- `benchmark_run`: retrieval 完成、metrics 完成、benchmark artifact 写入前。
+- `retrieval_run`: query 级处理进度和失败 query 计数。
+- `metrics_run`: query 级指标计算进度、missing/failed query 计数。
+
+## 6. 本轮未实现内容
 
 本文档是 runbook，不新增 CLI。真实运行仍需后续单独执行。
 

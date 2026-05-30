@@ -13,6 +13,7 @@ from eval_platform.benchmark.artifact import read_benchmark_run_artifact
 from eval_platform.benchmark.runner import run_benchmark
 from eval_platform.benchmark.schema import BenchmarkRunConfig
 from eval_platform.benchmark.settings import BenchmarkSettingSpec
+from eval_platform.chunking.progress import ProgressReporter, report_progress
 from eval_platform.embeddings import EmbeddingClient
 from eval_platform.metrics import MetricsRunConfig
 from eval_platform.retrieval import (
@@ -241,14 +242,37 @@ def run_benchmark_suite(
     embedding_client: EmbeddingClient | None = None,
     rewrite_client: RewriteClient | None = None,
     rerank_client: RerankClient | None = None,
+    progress_reporter: ProgressReporter | None = None,
 ) -> ArtifactManifest:
     """Run all dataset x setting benchmark items and write a suite summary."""
 
     item_summaries: list[BenchmarkSuiteItemSummary] = []
     dependencies: list[ArtifactDependency] = []
+    total_items = len(config.datasets) * len(config.settings)
+    completed_items = 0
+    report_progress(
+        progress_reporter,
+        stage="benchmark_suite_run",
+        current=0,
+        total=total_items,
+        message="Starting benchmark suite",
+        metadata=_suite_progress_metadata(config),
+    )
     for dataset in config.datasets:
         for setting in config.settings:
             item_config = build_benchmark_run_config(config, dataset, setting)
+            report_progress(
+                progress_reporter,
+                stage="benchmark_suite_run",
+                current=completed_items,
+                total=total_items,
+                message="Starting benchmark suite item",
+                metadata={
+                    **_suite_progress_metadata(config),
+                    **_item_progress_metadata(dataset, setting, item_config),
+                    "item_index": completed_items + 1,
+                },
+            )
             run_benchmark(
                 source_store,
                 output_store,
@@ -258,6 +282,7 @@ def run_benchmark_suite(
                 embedding_client=embedding_client,
                 rewrite_client=rewrite_client,
                 rerank_client=rerank_client,
+                progress_reporter=progress_reporter,
             )
             child_summary = read_benchmark_run_artifact(
                 output_store,
@@ -280,6 +305,21 @@ def run_benchmark_suite(
                     artifact_type=BENCHMARK_RUN_ARTIFACT_TYPE,
                     artifact_id=item_config.output_artifact_id,
                 )
+            )
+            completed_items += 1
+            report_progress(
+                progress_reporter,
+                stage="benchmark_suite_run",
+                current=completed_items,
+                total=total_items,
+                message="Completed benchmark suite item",
+                metadata={
+                    **_suite_progress_metadata(config),
+                    **_item_progress_metadata(dataset, setting, item_config),
+                    "item_index": completed_items,
+                    "main_score": child_summary.main_score,
+                    "main_score_metric": child_summary.main_score_metric,
+                },
             )
 
     summary = BenchmarkSuiteRunSummary(
@@ -345,3 +385,31 @@ def _suite_manifest_metadata(config: BenchmarkSuiteRunConfig) -> dict[str, Any]:
         }
     )
     return metadata
+
+
+def _suite_progress_metadata(config: BenchmarkSuiteRunConfig) -> dict[str, Any]:
+    metadata = dict(config.metadata)
+    metadata.update(
+        {
+            "suite_run_id": config.suite_run_id,
+            "dataset_count": len(config.datasets),
+            "setting_count": len(config.settings),
+            "item_count": len(config.datasets) * len(config.settings),
+            "query_limit": config.query_limit,
+        }
+    )
+    return metadata
+
+
+def _item_progress_metadata(
+    dataset: BenchmarkDatasetSpec,
+    setting: BenchmarkSettingSpec,
+    item_config: BenchmarkRunConfig,
+) -> dict[str, Any]:
+    return {
+        "dataset_key": dataset.dataset_key,
+        "setting_key": setting.setting_key,
+        "benchmark_run_artifact_id": item_config.output_artifact_id,
+        "retrieval_run_artifact_id": item_config.retrieval.output_artifact_id,
+        "metrics_run_artifact_id": item_config.metrics.output_artifact_id,
+    }
