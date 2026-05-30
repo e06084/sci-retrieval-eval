@@ -23,6 +23,7 @@ from eval_platform.benchmark import (
     run_benchmark_suite,
     settings_for_selection,
 )
+from eval_platform.chunking.progress import ProgressEvent
 from eval_platform.datasets import (
     CorpusRecord,
     NormalizedDataset,
@@ -317,6 +318,49 @@ def test_run_benchmark_suite_runs_items_and_writes_stable_summary(
     assert store.is_complete(BENCHMARK_SUITE_RUN_ARTIFACT_TYPE, "suite-1") is True
     assert "query_metrics" not in raw_summary
     assert "hits" not in raw_summary
+
+
+def test_run_benchmark_suite_reports_item_progress(
+    store: LocalArtifactStore,
+) -> None:
+    events: list[ProgressEvent] = []
+    config = _suite_config(
+        datasets=[
+            _dataset("ds1", "normalized-ds1"),
+            _dataset("ds2", "normalized-ds2"),
+        ],
+        settings=settings_for_selection(["E2-es", "E3-hybrid"]),
+    )
+
+    run_benchmark_suite(
+        store,
+        store,
+        config,
+        es_client=FakeElasticsearchClient(),
+        milvus_client=FakeMilvusClient(),
+        embedding_client=FakeEmbeddingClient(),
+        progress_reporter=events.append,
+    )
+
+    suite_events = [event for event in events if event.stage == "benchmark_suite_run"]
+    completed_events = [
+        event for event in suite_events if event.message == "Completed benchmark suite item"
+    ]
+
+    assert (suite_events[0].current, suite_events[0].total) == (0, 4)
+    assert [event.current for event in completed_events] == [1, 2, 3, 4]
+    assert [
+        (event.metadata["dataset_key"], event.metadata["setting_key"])
+        for event in completed_events
+    ] == [
+        ("ds1", "E2-es"),
+        ("ds1", "E3-hybrid"),
+        ("ds2", "E2-es"),
+        ("ds2", "E3-hybrid"),
+    ]
+    assert "benchmark_run" in {event.stage for event in events}
+    assert "retrieval_run" in {event.stage for event in events}
+    assert "metrics_run" in {event.stage for event in events}
 
 
 def test_run_benchmark_suite_records_query_limit_in_manifest(

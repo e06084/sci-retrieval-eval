@@ -12,6 +12,7 @@ from eval_platform.assets import (
     manifest_asset_fingerprint_sha256,
     retrieval_run_fingerprint_components,
 )
+from eval_platform.chunking.progress import ProgressReporter, report_progress
 from eval_platform.datasets import (
     NORMALIZED_DATASET_ARTIFACT_TYPE,
     read_normalized_dataset_artifact,
@@ -139,6 +140,7 @@ def run_retrieval(
     embedding_client: EmbeddingClient | None = None,
     rewrite_client: RewriteClient | None = None,
     rerank_client: RerankClient | None = None,
+    progress_reporter: ProgressReporter | None = None,
 ) -> ArtifactManifest:
     """Run retrieval for normalized queries and write a retrieval_run artifact."""
 
@@ -167,8 +169,19 @@ def run_retrieval(
         config.source_normalized_dataset_artifact_id,
     )
     queries = dataset.queries[: config.query_limit] if config.query_limit else dataset.queries
+    total_queries = len(queries)
+    report_progress(
+        progress_reporter,
+        stage="retrieval_run",
+        current=0,
+        total=total_queries,
+        message="Starting retrieval queries",
+        metadata=_progress_metadata(config),
+    )
     results: list[RetrievalQueryResult] = []
-    for query in queries:
+    failed_query_count = 0
+    for query_index, query in enumerate(queries, start=1):
+        query_error: str | None = None
         try:
             results.append(
                 _retrieve_one_query(
@@ -183,6 +196,8 @@ def run_retrieval(
                 )
             )
         except Exception as exc:
+            query_error = str(exc)
+            failed_query_count += 1
             results.append(
                 RetrievalQueryResult(
                     query_id=query.query_id,
@@ -193,9 +208,22 @@ def run_retrieval(
                         if config.trace_mode == "replay"
                         else None
                     ),
-                    error=str(exc),
+                    error=query_error,
                 )
             )
+        report_progress(
+            progress_reporter,
+            stage="retrieval_run",
+            current=query_index,
+            total=total_queries,
+            message="Processed retrieval query",
+            metadata={
+                **_progress_metadata(config),
+                "query_id": query.query_id,
+                "failed_query_count": failed_query_count,
+                "query_error": query_error,
+            },
+        )
 
     metadata = _build_manifest_metadata(config, source_store=source_store)
     return write_retrieval_run_artifact(
@@ -444,6 +472,23 @@ def _optional_mapping(value: Any) -> dict[str, Any] | None:
     if isinstance(value, dict):
         return value
     return None
+
+
+def _progress_metadata(config: RetrievalRunConfig) -> dict[str, Any]:
+    metadata = dict(config.metadata)
+    metadata.update(
+        {
+            "output_artifact_id": config.output_artifact_id,
+            "source_normalized_dataset_artifact_id": (
+                config.source_normalized_dataset_artifact_id
+            ),
+            "retrieval_mode": config.retrieval_mode,
+            "execution_mode": config.execution_mode,
+            "trace_mode": config.trace_mode,
+            "query_limit": config.query_limit,
+        }
+    )
+    return metadata
 
 
 def _build_dependencies(config: RetrievalRunConfig) -> list[ArtifactDependency]:

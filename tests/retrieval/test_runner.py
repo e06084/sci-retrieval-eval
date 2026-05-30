@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from eval_platform.artifacts import LocalArtifactStore
+from eval_platform.chunking.progress import ProgressEvent
 from eval_platform.datasets import (
     CorpusRecord,
     NormalizedDataset,
@@ -259,6 +260,34 @@ def test_run_retrieval_hybrid_runs_rrf_and_enriches(store: LocalArtifactStore) -
     ]
     assert manifest.metadata["query_count"] == 1
     assert manifest.metadata["result_record_count"] == 1
+
+
+def test_run_retrieval_reports_query_progress(store: LocalArtifactStore) -> None:
+    events: list[ProgressEvent] = []
+
+    run_retrieval(
+        store,
+        store,
+        _config(
+            retrieval_mode="es",
+            milvus_collection_artifact_id=None,
+            query_limit=2,
+        ),
+        es_client=FakeElasticsearchClient(),
+        progress_reporter=events.append,
+    )
+
+    retrieval_events = [event for event in events if event.stage == "retrieval_run"]
+
+    assert [(event.current, event.total) for event in retrieval_events] == [
+        (0, 2),
+        (1, 2),
+        (2, 2),
+    ]
+    assert retrieval_events[1].metadata["query_id"] == "q-1"
+    assert retrieval_events[2].metadata["query_id"] == "q-2"
+    assert retrieval_events[2].metadata["query_error"] == "boom"
+    assert retrieval_events[2].metadata["failed_query_count"] == 1
 
 
 def test_run_retrieval_defaults_to_replay_trace(store: LocalArtifactStore) -> None:

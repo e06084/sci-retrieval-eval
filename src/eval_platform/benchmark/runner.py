@@ -7,6 +7,7 @@ from typing import Any
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
 from eval_platform.benchmark.artifact import write_benchmark_run_artifact
 from eval_platform.benchmark.schema import BenchmarkRunConfig, BenchmarkRunSummary
+from eval_platform.chunking.progress import ProgressReporter, report_progress
 from eval_platform.datasets import NORMALIZED_DATASET_ARTIFACT_TYPE
 from eval_platform.embeddings import EmbeddingClient
 from eval_platform.metrics import (
@@ -34,9 +35,18 @@ def run_benchmark(
     embedding_client: EmbeddingClient | None = None,
     rewrite_client: RewriteClient | None = None,
     rerank_client: RerankClient | None = None,
+    progress_reporter: ProgressReporter | None = None,
 ) -> ArtifactManifest:
     """Run retrieval then metrics and write a benchmark_run artifact."""
 
+    report_progress(
+        progress_reporter,
+        stage="benchmark_run",
+        current=0,
+        total=3,
+        message="Starting benchmark run",
+        metadata=_progress_metadata(config),
+    )
     retrieval_manifest = run_retrieval(
         source_store,
         output_store,
@@ -46,11 +56,29 @@ def run_benchmark(
         embedding_client=embedding_client,
         rewrite_client=rewrite_client,
         rerank_client=rerank_client,
+        progress_reporter=progress_reporter,
+    )
+    report_progress(
+        progress_reporter,
+        stage="benchmark_run",
+        current=1,
+        total=3,
+        message="Completed retrieval stage",
+        metadata=_progress_metadata(config),
     )
     metrics_manifest = run_metrics(
         _BenchmarkReadStore(source_store, output_store),
         output_store,
         config.metrics,
+        progress_reporter=progress_reporter,
+    )
+    report_progress(
+        progress_reporter,
+        stage="benchmark_run",
+        current=2,
+        total=3,
+        message="Completed metrics stage",
+        metadata=_progress_metadata(config),
     )
     metrics_data = read_metrics_run_artifact(output_store, config.metrics.output_artifact_id)
     summary = BenchmarkRunSummary(
@@ -62,6 +90,18 @@ def run_benchmark(
         main_score=metrics_data.main_score,
         main_score_metric=metrics_data.main_score_metric,
         aggregate_metrics=metrics_data.aggregate,
+    )
+    report_progress(
+        progress_reporter,
+        stage="benchmark_run",
+        current=3,
+        total=3,
+        message="Writing benchmark run artifact",
+        metadata={
+            **_progress_metadata(config),
+            "main_score": metrics_data.main_score,
+            "main_score_metric": metrics_data.main_score_metric,
+        },
     )
     return write_benchmark_run_artifact(
         output_store,
@@ -85,6 +125,25 @@ def run_benchmark(
         created_by=config.created_by,
         code_git_sha=config.code_git_sha,
     )
+
+
+def _progress_metadata(config: BenchmarkRunConfig) -> dict[str, Any]:
+    metadata = dict(config.metadata)
+    metadata.update(
+        {
+            "output_artifact_id": config.output_artifact_id,
+            "source_normalized_dataset_artifact_id": (
+                config.source_normalized_dataset_artifact_id
+            ),
+            "setting_name": config.setting_name,
+            "retrieval_run_artifact_id": config.retrieval.output_artifact_id,
+            "metrics_run_artifact_id": config.metrics.output_artifact_id,
+            "retrieval_mode": config.retrieval.retrieval_mode,
+            "retrieval_execution_mode": config.retrieval.execution_mode,
+            "query_limit": config.retrieval.query_limit,
+        }
+    )
+    return metadata
 
 
 def _build_manifest_metadata(
