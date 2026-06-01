@@ -6,6 +6,9 @@ from eval_platform import benchmark, chunking, corpus_build, embeddings, indexes
 from eval_platform import datasets as datasets_pkg
 from eval_platform.artifacts import ALL_ARTIFACT_TYPES as EXPORTED_ALL_ARTIFACT_TYPES
 from eval_platform.artifacts import (
+    ARTIFACT_CATALOG_ARTIFACT_TYPE as EXPORTED_ARTIFACT_CATALOG_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
     BENCHMARK_RUN_ARTIFACT_TYPE as EXPORTED_BENCHMARK_RUN_ARTIFACT_TYPE,
 )
 from eval_platform.artifacts import (
@@ -27,6 +30,9 @@ from eval_platform.artifacts import (
     EMBEDDINGS_ARTIFACT_TYPE as EXPORTED_EMBEDDINGS_ARTIFACT_TYPE,
 )
 from eval_platform.artifacts import (
+    EXPERIMENT_RUN_ARTIFACT_TYPE as EXPORTED_EXPERIMENT_RUN_ARTIFACT_TYPE,
+)
+from eval_platform.artifacts import (
     METRICS_RUN_ARTIFACT_TYPE as EXPORTED_METRICS_RUN_ARTIFACT_TYPE,
 )
 from eval_platform.artifacts import (
@@ -43,6 +49,7 @@ from eval_platform.artifacts import (
 )
 from eval_platform.artifacts.types import (
     ALL_ARTIFACT_TYPES,
+    ARTIFACT_CATALOG_ARTIFACT_TYPE,
     BENCHMARK_RUN_ARTIFACT_TYPE,
     BENCHMARK_SUITE_RUN_ARTIFACT_TYPE,
     CHUNKED_CORPUS_ARTIFACT_TYPE,
@@ -50,6 +57,7 @@ from eval_platform.artifacts.types import (
     CORPUS_BUILD_ARTIFACT_TYPE,
     ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
     EMBEDDINGS_ARTIFACT_TYPE,
+    EXPERIMENT_RUN_ARTIFACT_TYPE,
     METRICS_RUN_ARTIFACT_TYPE,
     MILVUS_COLLECTION_ARTIFACT_TYPE,
     NORMALIZED_DATASET_ARTIFACT_TYPE,
@@ -81,9 +89,11 @@ def test_all_artifact_types_are_complete_and_unique() -> None:
         METRICS_RUN_ARTIFACT_TYPE,
         BENCHMARK_RUN_ARTIFACT_TYPE,
         BENCHMARK_SUITE_RUN_ARTIFACT_TYPE,
+        EXPERIMENT_RUN_ARTIFACT_TYPE,
         CORPUS_BUILD_ARTIFACT_TYPE,
+        ARTIFACT_CATALOG_ARTIFACT_TYPE,
     ]
-    assert len(ALL_ARTIFACT_TYPES) == 11
+    assert len(ALL_ARTIFACT_TYPES) == 13
     assert len(set(ALL_ARTIFACT_TYPES)) == len(ALL_ARTIFACT_TYPES)
 
 
@@ -135,4 +145,6 @@ def test_artifacts_package_exports_artifact_type_registry() -> None:
         EXPORTED_BENCHMARK_SUITE_RUN_ARTIFACT_TYPE
         == BENCHMARK_SUITE_RUN_ARTIFACT_TYPE
     )
+    assert EXPORTED_EXPERIMENT_RUN_ARTIFACT_TYPE == EXPERIMENT_RUN_ARTIFACT_TYPE
     assert EXPORTED_CORPUS_BUILD_ARTIFACT_TYPE == CORPUS_BUILD_ARTIFACT_TYPE
+    assert EXPORTED_ARTIFACT_CATALOG_ARTIFACT_TYPE == ARTIFACT_CATALOG_ARTIFACT_TYPE

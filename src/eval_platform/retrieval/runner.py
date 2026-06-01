@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_va
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
 from eval_platform.assets import (
     add_asset_fingerprint_metadata,
+    build_asset_fingerprint,
     manifest_asset_fingerprint_sha256,
     retrieval_run_fingerprint_components,
 )
@@ -236,6 +237,21 @@ def run_retrieval(
         created_by=config.created_by,
         code_git_sha=config.code_git_sha,
     )
+
+
+def build_retrieval_run_fingerprint_sha256(
+    source_store: ArtifactStore,
+    config: RetrievalRunConfig,
+) -> str | None:
+    """Return the expected retrieval_run asset fingerprint for a config, if available."""
+
+    components = _retrieval_asset_fingerprint_components(config, source_store=source_store)
+    if components is None:
+        return None
+    return build_asset_fingerprint(
+        artifact_type=RETRIEVAL_RUN_ARTIFACT_TYPE,
+        components=components,
+    ).sha256
 
 
 def _validate_runtime_dependencies(

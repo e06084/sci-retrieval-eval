@@ -8,7 +8,11 @@ from eval_platform.benchmark.artifact import (
     read_benchmark_run_artifact,
     write_benchmark_run_artifact,
 )
-from eval_platform.benchmark.runner import run_benchmark
+from eval_platform.benchmark.runner import (
+    build_benchmark_run_fingerprint_sha256,
+    run_benchmark,
+    write_benchmark_run_from_existing_artifacts,
+)
 from eval_platform.benchmark.schema import BenchmarkRunConfig, BenchmarkRunSummary
 from eval_platform.benchmark.settings import (
     DEFAULT_E1_E4_SETTINGS,
@@ -45,12 +49,14 @@ __all__ = [
     "BenchmarkSuiteItemSummary",
     "BenchmarkSuiteRunConfig",
     "BenchmarkSuiteRunSummary",
+    "build_benchmark_run_fingerprint_sha256",
     "build_benchmark_run_config",
     "read_benchmark_run_artifact",
     "read_benchmark_suite_run_artifact",
     "run_benchmark",
     "run_benchmark_suite",
     "settings_for_selection",
+    "write_benchmark_run_from_existing_artifacts",
     "write_benchmark_run_artifact",
     "write_benchmark_suite_run_artifact",
 ]

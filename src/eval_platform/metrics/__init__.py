@@ -10,7 +10,11 @@ from eval_platform.metrics.artifact import (
 )
 from eval_platform.metrics.ir import aggregate_query_metrics, compute_query_metrics
 from eval_platform.metrics.projection import project_retrieval_result_to_docs
-from eval_platform.metrics.runner import MetricsRunConfig, run_metrics
+from eval_platform.metrics.runner import (
+    MetricsRunConfig,
+    build_metrics_run_fingerprint_sha256,
+    run_metrics,
+)
 from eval_platform.metrics.schema import (
     MetricsRunData,
     ProjectionStats,
@@ -29,6 +33,7 @@ __all__ = [
     "QueryMetricsRecord",
     "RankedDoc",
     "aggregate_query_metrics",
+    "build_metrics_run_fingerprint_sha256",
     "compute_query_metrics",
     "project_retrieval_result_to_docs",
     "read_metrics_run_artifact",

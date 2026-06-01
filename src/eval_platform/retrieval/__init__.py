@@ -38,7 +38,12 @@ from eval_platform.retrieval.rerank import (
     rerank_client_from_config,
     run_rerank_consistency_check,
 )
-from eval_platform.retrieval.runner import RetrievalRunConfig, RetrievalRunError, run_retrieval
+from eval_platform.retrieval.runner import (
+    RetrievalRunConfig,
+    RetrievalRunError,
+    build_retrieval_run_fingerprint_sha256,
+    run_retrieval,
+)
 from eval_platform.retrieval.schema import (
     RetrievalHit,
     RetrievalMode,
@@ -68,6 +73,7 @@ __all__ = [
     "RetrievalRunConfig",
     "RetrievalRunError",
     "RewriteClient",
+    "build_retrieval_run_fingerprint_sha256",
     "dedupe_by_chunk_id",
     "dedupe_sequential",
     "dump_retrieval_results_jsonl",

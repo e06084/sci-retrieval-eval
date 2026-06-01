@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
+from eval_platform.artifacts.types import BENCHMARK_RUN_ARTIFACT_TYPE
+from eval_platform.assets import (
+    add_asset_fingerprint_metadata,
+    benchmark_run_fingerprint_components,
+    build_asset_fingerprint,
+    manifest_asset_fingerprint_sha256,
+)
 from eval_platform.benchmark.artifact import write_benchmark_run_artifact
 from eval_platform.benchmark.schema import BenchmarkRunConfig, BenchmarkRunSummary
 from eval_platform.chunking.progress import ProgressReporter, report_progress
@@ -80,6 +87,25 @@ def run_benchmark(
         message="Completed metrics stage",
         metadata=_progress_metadata(config),
     )
+    return write_benchmark_run_from_existing_artifacts(
+        output_store,
+        config,
+        retrieval_manifest=retrieval_manifest,
+        metrics_manifest=metrics_manifest,
+        progress_reporter=progress_reporter,
+    )
+
+
+def write_benchmark_run_from_existing_artifacts(
+    output_store: ArtifactStore,
+    config: BenchmarkRunConfig,
+    *,
+    retrieval_manifest: ArtifactManifest,
+    metrics_manifest: ArtifactManifest,
+    progress_reporter: ProgressReporter | None = None,
+) -> ArtifactManifest:
+    """Write a benchmark_run summary for already materialized retrieval/metrics runs."""
+
     metrics_data = read_metrics_run_artifact(output_store, config.metrics.output_artifact_id)
     summary = BenchmarkRunSummary(
         benchmark_run_artifact_id=config.output_artifact_id,
@@ -125,6 +151,27 @@ def run_benchmark(
         created_by=config.created_by,
         code_git_sha=config.code_git_sha,
     )
+
+
+def build_benchmark_run_fingerprint_sha256(
+    config: BenchmarkRunConfig,
+    *,
+    retrieval_manifest: ArtifactManifest,
+    metrics_manifest: ArtifactManifest,
+) -> str | None:
+    """Return the expected benchmark_run asset fingerprint for existing child runs."""
+
+    components = _benchmark_asset_fingerprint_components(
+        config,
+        retrieval_manifest=retrieval_manifest,
+        metrics_manifest=metrics_manifest,
+    )
+    if components is None:
+        return None
+    return build_asset_fingerprint(
+        artifact_type=BENCHMARK_RUN_ARTIFACT_TYPE,
+        components=components,
+    ).sha256
 
 
 def _progress_metadata(config: BenchmarkRunConfig) -> dict[str, Any]:
@@ -182,7 +229,38 @@ def _build_manifest_metadata(
             ),
         }
     )
+    add_asset_fingerprint_metadata(
+        metadata,
+        artifact_type=BENCHMARK_RUN_ARTIFACT_TYPE,
+        components=_benchmark_asset_fingerprint_components(
+            config,
+            retrieval_manifest=retrieval_manifest,
+            metrics_manifest=metrics_manifest,
+        ),
+    )
     return metadata
+
+
+def _benchmark_asset_fingerprint_components(
+    config: BenchmarkRunConfig,
+    *,
+    retrieval_manifest: ArtifactManifest,
+    metrics_manifest: ArtifactManifest,
+) -> dict[str, Any] | None:
+    retrieval_fingerprint = manifest_asset_fingerprint_sha256(retrieval_manifest)
+    metrics_fingerprint = manifest_asset_fingerprint_sha256(metrics_manifest)
+    if retrieval_fingerprint is None or metrics_fingerprint is None:
+        return None
+
+    return benchmark_run_fingerprint_components(
+        retrieval_run_fingerprint=retrieval_fingerprint,
+        metrics_run_fingerprint=metrics_fingerprint,
+        benchmark_source="sci-retrieval-eval",
+        code_git_commit=config.code_git_sha or "unknown",
+        benchmark_entrypoint="eval_platform.benchmark.runner.write_benchmark_run_from_existing_artifacts",
+        setting_name=config.setting_name,
+        benchmark_params={},
+    )
 
 
 class _BenchmarkReadStore(ArtifactStore):

@@ -9,6 +9,7 @@ dist/
 *.egg-info/
 .env
 .local_artifacts/
+tmp/
 config.yaml
 config.local.yaml
 *.secret.yaml

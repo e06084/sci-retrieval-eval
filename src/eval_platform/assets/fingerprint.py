@@ -444,6 +444,44 @@ def metrics_run_fingerprint_components(
     return components
 
 
+def benchmark_run_fingerprint_components(
+    *,
+    retrieval_run_fingerprint: str,
+    metrics_run_fingerprint: str,
+    benchmark_source: str,
+    code_git_commit: str,
+    benchmark_entrypoint: str,
+    setting_name: str | None = None,
+    benchmark_params: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build fingerprint components for a benchmark run summary."""
+
+    components = {
+        "retrieval_run_fingerprint": _require_non_empty(
+            retrieval_run_fingerprint,
+            "retrieval_run_fingerprint",
+        ),
+        "metrics_run_fingerprint": _require_non_empty(
+            metrics_run_fingerprint,
+            "metrics_run_fingerprint",
+        ),
+        "benchmark_source": _require_non_empty(benchmark_source, "benchmark_source"),
+        "code_git_commit": _require_non_empty(code_git_commit, "code_git_commit"),
+        "benchmark_entrypoint": _require_non_empty(
+            benchmark_entrypoint,
+            "benchmark_entrypoint",
+        ),
+        "setting_name": _optional_non_empty(setting_name, "setting_name"),
+        "benchmark_params": _normalize_optional_mapping(
+            benchmark_params,
+            "benchmark_params",
+            reject_physical_keys=True,
+        ),
+    }
+    assert_no_secret_keys(components)
+    return components
+
+
 def _require_non_empty(value: str, field_name: str) -> str:
     if not isinstance(value, str):
         raise AssetFingerprintError(f"{field_name} must be a string")

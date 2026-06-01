@@ -1,5 +1,19 @@
 """Artifact storage layer."""
 
+from eval_platform.artifacts.catalog import (
+    CATALOG_RECORDS_FILENAME,
+    DEFAULT_CATALOG_ID,
+    ArtifactCatalogRecord,
+    build_artifact_catalog_record,
+    dump_artifact_catalog_jsonl,
+    find_catalog_record_by_fingerprint,
+    load_artifact_catalog_jsonl,
+    read_artifact_catalog,
+    scan_artifact_catalog_records,
+    sync_artifact_catalog_from_store,
+    upsert_artifact_catalog_record,
+    write_artifact_catalog,
+)
 from eval_platform.artifacts.local import LocalArtifactStore
 from eval_platform.artifacts.manifest import ArtifactDependency, ArtifactFile, ArtifactManifest
 from eval_platform.artifacts.metadata_keys import (
@@ -28,6 +42,7 @@ from eval_platform.artifacts.store import (
 )
 from eval_platform.artifacts.types import (
     ALL_ARTIFACT_TYPES,
+    ARTIFACT_CATALOG_ARTIFACT_TYPE,
     BENCHMARK_RUN_ARTIFACT_TYPE,
     BENCHMARK_SUITE_RUN_ARTIFACT_TYPE,
     CHUNKED_CORPUS_ARTIFACT_TYPE,
@@ -35,6 +50,7 @@ from eval_platform.artifacts.types import (
     CORPUS_BUILD_ARTIFACT_TYPE,
     ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
     EMBEDDINGS_ARTIFACT_TYPE,
+    EXPERIMENT_RUN_ARTIFACT_TYPE,
     METRICS_RUN_ARTIFACT_TYPE,
     MILVUS_COLLECTION_ARTIFACT_TYPE,
     NORMALIZED_DATASET_ARTIFACT_TYPE,
@@ -44,14 +60,18 @@ from eval_platform.artifacts.types import (
 
 __all__ = [
     "ALL_ARTIFACT_TYPES",
+    "ARTIFACT_CATALOG_ARTIFACT_TYPE",
+    "CATALOG_RECORDS_FILENAME",
     "BENCHMARK_RUN_ARTIFACT_TYPE",
     "BENCHMARK_SUITE_RUN_ARTIFACT_TYPE",
     "CHUNKED_CORPUS_ARTIFACT_TYPE",
     "CORPUS_ASSET_STAGE_ORDER",
     "CORPUS_BUILD_ARTIFACT_TYPE",
+    "DEFAULT_CATALOG_ID",
     "DEPENDENCY_METADATA_KEYS_BY_ARTIFACT_TYPE",
     "ELASTICSEARCH_INDEX_ARTIFACT_TYPE",
     "EMBEDDINGS_ARTIFACT_TYPE",
+    "EXPERIMENT_RUN_ARTIFACT_TYPE",
     "MANIFEST_FILENAME",
     "METADATA_KEY_ASSET_FINGERPRINT",
     "METADATA_KEY_ASSET_FINGERPRINT_SHA256",
@@ -72,6 +92,7 @@ __all__ = [
     "ArtifactDependency",
     "ArtifactFile",
     "ArtifactManifest",
+    "ArtifactCatalogRecord",
     "ArtifactIncompleteError",
     "ArtifactNotFoundError",
     "ArtifactStore",
@@ -81,4 +102,13 @@ __all__ = [
     "ManifestMismatchError",
     "ManifestNotFoundError",
     "S3ArtifactStore",
+    "build_artifact_catalog_record",
+    "dump_artifact_catalog_jsonl",
+    "find_catalog_record_by_fingerprint",
+    "load_artifact_catalog_jsonl",
+    "read_artifact_catalog",
+    "scan_artifact_catalog_records",
+    "sync_artifact_catalog_from_store",
+    "upsert_artifact_catalog_record",
+    "write_artifact_catalog",
 ]
