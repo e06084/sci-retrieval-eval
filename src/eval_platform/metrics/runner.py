@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
 from eval_platform.assets import (
     add_asset_fingerprint_metadata,
+    build_asset_fingerprint,
     manifest_asset_fingerprint_sha256,
     metrics_run_fingerprint_components,
 )
@@ -18,7 +19,7 @@ from eval_platform.datasets import (
     NormalizedDataset,
     read_normalized_dataset_artifact,
 )
-from eval_platform.metrics.artifact import write_metrics_run_artifact
+from eval_platform.metrics.artifact import METRICS_RUN_ARTIFACT_TYPE, write_metrics_run_artifact
 from eval_platform.metrics.ir import aggregate_query_metrics, compute_query_metrics
 from eval_platform.metrics.projection import project_retrieval_result_to_docs
 from eval_platform.metrics.schema import (
@@ -117,6 +118,21 @@ def run_metrics(
         created_by=config.created_by,
         code_git_sha=config.code_git_sha,
     )
+
+
+def build_metrics_run_fingerprint_sha256(
+    source_store: ArtifactStore,
+    config: MetricsRunConfig,
+) -> str | None:
+    """Return the expected metrics_run asset fingerprint for a config, if available."""
+
+    components = _metrics_asset_fingerprint_components(config, source_store=source_store)
+    if components is None:
+        return None
+    return build_asset_fingerprint(
+        artifact_type=METRICS_RUN_ARTIFACT_TYPE,
+        components=components,
+    ).sha256
 
 
 def build_metrics_run_data(
