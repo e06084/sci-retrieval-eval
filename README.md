@@ -7,8 +7,9 @@
 - 五个目标数据集的 raw / normalized / chunk / embedding / ES / Milvus artifact 管理。
 - live ES、Milvus、hybrid、rerank 检索。
 - `retrieval_run -> metrics_run -> benchmark_run -> benchmark_suite_run` 评测链路。
+- `experiment_run` 实验层，可按 fingerprint 复用或补跑 retrieval / metrics / benchmark stage。
 - trace/replay 所需的检索记录。
-- S3 artifact store、真实服务配置脱敏、真实环境连通性检查。
+- S3 artifact store、artifact catalog、真实服务配置脱敏、真实环境连通性检查。
 
 ## 核心设计
 
@@ -32,13 +33,14 @@ normalized_dataset + elasticsearch_index + milvus_collection
   -> retrieval_run
   -> metrics_run
   -> benchmark_run
-  -> benchmark_suite_run
+  -> benchmark_suite_run 或 experiment_run
 ```
 
 关键原则：
 
 - 每个完成 artifact 都要有 manifest 和 `_SUCCESS`。
 - 下游阶段必须校验上游 artifact 完成状态。
+- 资产逻辑等价由 `asset_fingerprint` 判断，`run_id`、时间戳、物理资源名和真实服务地址不进入 fingerprint。
 - 检索执行和指标计算分离。
 - 检索可以返回 chunk-level hits，metrics 阶段投影回 doc-level ranking。
 - 默认记录完整 trace，便于复现、replay 和排查随机性。
@@ -59,6 +61,7 @@ src/eval_platform/
   retrieval/       ES、Milvus、hybrid、RRF、rerank、trace、replay
   metrics/         MTEB 风格 doc-level metrics
   benchmark/       retrieval + metrics + suite 编排
+  experiments/     实验计划、自动复用/补跑、experiment_run artifact
   mteb_adapter/    MTEB 数据和任务适配
 ```
 
@@ -197,6 +200,28 @@ python scripts/build_real_corpus_assets.py \
 
 注意：`scripts/build_real_corpus_assets.py` 当前是规划脚本，`--execute` 会拒绝执行真实写入。真实构建应通过 `eval_platform.corpus_build` 和显式 client 编排，确保每一步产出 artifact 和 manifest。
 
+## Experiment 运行层
+
+main 分支当前的实验抽象是 Python API，不是正式 CLI。推荐流程：
+
+```text
+1. 用 corpus asset inventory / planning 确认五数据集 normalized、ES、Milvus 资产。
+2. 构造 ExperimentRunConfig，可以显式传 BenchmarkDatasetSpec，也可以通过 ExperimentCorpusAssetConfig 从 corpus assets 自动解析。
+3. plan_experiment 计算 dataset x setting 的 retrieval / metrics / benchmark 预期 fingerprint 和 reuse/create 决策。
+4. run_experiment 只执行缺失 stage，并写入 experiment_run artifact。
+5. 可选写入 artifact_catalog/default/records.jsonl，后续实验优先按 catalog 查找可复用 artifact。
+```
+
+核心 API：
+
+- `ExperimentCorpusAssetConfig`
+- `ExperimentRunConfig`
+- `plan_experiment`
+- `run_experiment`
+- `read_experiment_run_artifact`
+
+复用规则以 `asset_fingerprint_sha256` 为准。catalog 是查询加速索引，不是唯一真相；唯一真相仍是 artifact 目录中的 manifest 和 `_SUCCESS`。如果只改变 rerank 或 metric 配置，系统应复用 corpus / index 资产，只补跑受影响的 retrieval、metrics 或 benchmark stage。
+
 ## Benchmark 运行口径
 
 当前评测 setting：
@@ -220,7 +245,7 @@ python scripts/build_real_corpus_assets.py \
 - embedding endpoint index `1`，当前为 `3886`
 - rerank endpoint index `1`，当前为 `3886`
 
-当前 main 的稳定抽象是 Python API：
+当前 main 保留 `benchmark_suite` Python API：
 
 - `BenchmarkDatasetSpec`
 - `BenchmarkSettingSpec`
@@ -228,9 +253,11 @@ python scripts/build_real_corpus_assets.py \
 - `run_benchmark_suite`
 - `read_benchmark_suite_run_artifact`
 
-完整 5bench x E1-E4 的批处理 CLI 仍需后续正式化。当前真实实验通过上述 API 编排，并把结果写入 S3 `benchmark_suite_run` artifact。
+完整 5bench x E1-E4 的批处理 CLI 仍需后续正式化。当前真实实验可通过 `benchmark_suite` API 直接编排，也可通过 `experiments` API 做计划、复用和补跑；结果分别写入 S3 `benchmark_suite_run` 或 `experiment_run` artifact。
 
-## 当前实验结果
+## Baseline 实验结果
+
+以下结果是 main README 记录的 2026-05-29 baseline，用于说明当前主线可复现的 E1-E4 全量评测口径；不包含实验分支上的后续 top-k / RRF / rerank sweep 结果。
 
 实验时间：2026-05-29
 
