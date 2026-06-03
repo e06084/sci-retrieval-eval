@@ -325,6 +325,114 @@ metrics failed retrieval query count = 0
 | E3-hybrid | 0.43841 | 0.17356 | 0.47876 | 0.83689 | 0.57515 |
 | E4-hybrid-rerank | 0.43841 | 0.17356 | 0.47876 | 0.83689 | 0.57515 |
 
+## H 集群复现实验记录
+
+以下结果是 2026-06-02 在 H 集群新建 OpenSearch / Milvus 资产后的复现实验。chunk 和
+embedding 资产复用已有构建结果，OpenSearch 与 Milvus 均重新入库；Milvus 使用对齐后的
+HNSW 参数。
+
+Suite：
+
+```text
+full_all_e1_e4_top100_hnsw_replay_20260602
+```
+
+配置：
+
+```text
+top_k=100
+hybrid_per_source_topk=50
+rrf_path_topk=25
+rerank_cross_path_topk=50
+rerank_candidate_cap=0
+trace_mode=replay
+Milvus db_name=mineru_core
+Milvus index_type=HNSW
+Milvus metric_type=COSINE
+Milvus index params={"M":16,"efConstruction":200}
+Milvus search params={"metric_type":"COSINE","params":{}}
+```
+
+验收：
+
+```text
+20/20 benchmark items complete
+retrieval failed query count = 0
+metrics failed retrieval query count = 0
+Milvus indexes all Finished
+pending_index_rows = 0
+indexed_rows = total_rows
+```
+
+物理环境记录：
+
+```text
+pymilvus=3.0.0
+H 集群 Milvus server=2.5.27
+README baseline Milvus server=2.6.15
+```
+
+### H 集群 ndcg10
+
+| setting | IFIRNFCorpus | NFCorpus | IFIRScifact | SciFact | LitSearch |
+|---|---:|---:|---:|---:|---:|
+| E1-milvus | 0.34411 | 0.30639 | 0.41185 | 0.63109 | 0.31975 |
+| E2-es | 0.22833 | 0.28289 | 0.23974 | 0.58076 | 0.29673 |
+| E3-hybrid | 0.30395 | 0.32921 | 0.37502 | 0.66473 | 0.37893 |
+| E4-hybrid-rerank | 0.36664 | 0.33561 | 0.47479 | 0.70221 | 0.40130 |
+
+### H 集群 mrr10
+
+| setting | IFIRNFCorpus | NFCorpus | IFIRScifact | SciFact | LitSearch |
+|---|---:|---:|---:|---:|---:|
+| E1-milvus | 0.39919 | 0.49918 | 0.65223 | 0.59528 | 0.28890 |
+| E2-es | 0.27694 | 0.47715 | 0.36986 | 0.54895 | 0.26003 |
+| E3-hybrid | 0.32527 | 0.52372 | 0.57459 | 0.62668 | 0.34006 |
+| E4-hybrid-rerank | 0.43874 | 0.53946 | 0.72772 | 0.67255 | 0.36040 |
+
+### H 集群 r100
+
+| setting | IFIRNFCorpus | NFCorpus | IFIRScifact | SciFact | LitSearch |
+|---|---:|---:|---:|---:|---:|
+| E1-milvus | 0.68476 | 0.24508 | 0.73384 | 0.89533 | 0.71490 |
+| E2-es | 0.42591 | 0.19802 | 0.39833 | 0.83722 | 0.59354 |
+| E3-hybrid | 0.43841 | 0.17608 | 0.49131 | 0.83689 | 0.57853 |
+| E4-hybrid-rerank | 0.43841 | 0.17608 | 0.49131 | 0.83689 | 0.57853 |
+
+### H 集群相对 baseline 的 ndcg10 delta
+
+| setting | IFIRNFCorpus | NFCorpus | IFIRScifact | SciFact | LitSearch |
+|---|---:|---:|---:|---:|---:|
+| E1-milvus | +0.00102 | +0.00252 | -0.00009 | +0.00229 | +0.00586 |
+| E2-es | +0.00000 | -0.00000 | +0.00000 | +0.00000 | +0.00000 |
+| E3-hybrid | +0.00170 | -0.00025 | -0.00094 | +0.01185 | +0.00127 |
+| E4-hybrid-rerank | -0.00019 | +0.00175 | +0.01322 | +0.00103 | +0.00185 |
+
+### H 集群相对 baseline 的 mrr10 delta
+
+| setting | IFIRNFCorpus | NFCorpus | IFIRScifact | SciFact | LitSearch |
+|---|---:|---:|---:|---:|---:|
+| E1-milvus | -0.00000 | -0.00561 | -0.00380 | +0.00106 | +0.00571 |
+| E2-es | -0.00000 | +0.00000 | -0.00000 | +0.00000 | +0.00000 |
+| E3-hybrid | +0.00067 | -0.00358 | -0.01092 | +0.01356 | +0.00204 |
+| E4-hybrid-rerank | +0.00000 | +0.00320 | +0.03630 | +0.00052 | +0.00178 |
+
+### H 集群相对 baseline 的 r100 delta
+
+| setting | IFIRNFCorpus | NFCorpus | IFIRScifact | SciFact | LitSearch |
+|---|---:|---:|---:|---:|---:|
+| E1-milvus | -0.01038 | +0.00624 | +0.00195 | +0.00000 | +0.00225 |
+| E2-es | +0.00000 | +0.00000 | -0.00000 | +0.00000 | -0.00000 |
+| E3-hybrid | +0.00000 | +0.00252 | +0.01255 | -0.00000 | +0.00338 |
+| E4-hybrid-rerank | +0.00000 | +0.00252 | +0.01255 | -0.00000 | +0.00338 |
+
+结论：
+
+- E2 OpenSearch 结果与 README baseline 完全对齐。
+- 重新按 HNSW 参数入库后，Milvus 和 hybrid/rerank 结果已接近 baseline。
+- 剩余残差主要集中在 Milvus 相关路径；当前已知未完全一致的物理变量是 H 集群
+  Milvus server `2.5.27` 与 baseline Milvus server `2.6.15` 不同。
+
 ## 重复性检查
 
 复跑 suite：
