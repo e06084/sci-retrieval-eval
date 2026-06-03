@@ -242,6 +242,8 @@ main 分支当前的实验抽象是 Python API，不是正式 CLI。推荐流程
 - `rerank_candidate_cap=0`
 - `sub_queries=0`
 - `rewrite_enabled=false`
+- metrics 默认 `k_values=[5,10,20]`，优先关注 `recall_at_5`、`recall_at_10`、`recall_at_20`。
+- 默认主指标为 `recall_at_10`。
 - Milvus index 默认 `HNSW + COSINE + M=16 + efConstruction=200`。
 - Milvus search params 默认显式传 `{"metric_type": "COSINE", "params": {}}`。
 - Milvus schema 默认 `title.max_length=65535`，用于兼容 LitSearch 长标题；`text.max_length=65535`。
@@ -251,6 +253,7 @@ main 分支当前的实验抽象是 Python API，不是正式 CLI。推荐流程
 
 - embedding endpoint index `1`，当前为 `3886`
 - rerank endpoint index `1`，当前为 `3886`
+- 如需复现旧表格中的 `ndcg10`、`mrr10`、`r100`，需要显式传入对应 metrics cutoff，而不是依赖默认值。
 
 当前 main 保留 `benchmark_suite` Python API：
 

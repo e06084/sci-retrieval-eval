@@ -51,10 +51,15 @@ hybrid_per_source_topk = 50
 rrf_path_topk = 25
 rerank_cross_path_topk = 50
 rerank_candidate_cap = 0
+metrics_k_values = [5, 10, 20]
+main_score_metric = recall_at_10
 trace_mode = replay
 ```
 
 不要在 baseline 中关闭 trace。trace 是后续 replay、排查失败 query、比较 setting 行为的基础审计数据。
+
+默认实验报告应优先看 `recall_at_5`、`recall_at_10`、`recall_at_20`。如果需要和历史 README
+baseline 对比 `ndcg10`、`mrr10` 或 `r100`，应在实验配置中显式传入对应 `metrics_k_values`。
 
 Milvus collection 建议使用 Sciverse benchmark v1 默认协议：
 

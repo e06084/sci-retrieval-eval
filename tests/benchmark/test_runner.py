@@ -149,8 +149,11 @@ def test_run_benchmark_live_path_writes_summary_and_dependencies(
     assert es.search_calls == [("chunks-index", "alpha", 1)]
     assert retrieval_records[0].hits[0].doc_id == "doc-1"
     assert metrics_data.main_score == 1.0
+    assert metrics_data.main_score_metric == "recall_at_10"
     assert summary.main_score == 1.0
+    assert summary.main_score_metric == "recall_at_10"
     assert summary.setting_name == "es-baseline"
+    assert summary.aggregate_metrics["recall_at_10"] == 1.0
     assert summary.aggregate_metrics["ndcg_at_10"] == 1.0
     assert manifest.metadata["stage"] == "benchmark_run"
     assert manifest.metadata["setting_name"] == "es-baseline"

@@ -4,90 +4,65 @@
 
 ## 1. 任务信息
 
-- 任务名：`Sciverse benchmark v1 默认参数固化`
-- 当前分支：`feat/sciverse-benchmark-defaults`
-- 基线：`main`
+- 任务名：`默认实验指标关注 recall@5/10/20`
+- 当前分支：`feat/default-recall-at-5-10-20`
+- 基线：`origin/main`
 - 完成时间：2026-06-03
 
 ## 2. 本轮实现
 
-本轮把复现实验确认后的 Sciverse benchmark v1 口径固化为代码默认值，避免后续运行时继续依赖脚本或人工显式传参。
+本轮把后续实验的默认 metric 关注点改为浅层 recall：
 
-改动：
-
-- 新增 `eval_platform.defaults`
-  - 集中定义 retrieval、hybrid、rerank 和 Milvus 默认参数。
-  - `DEFAULT_RETRIEVAL_TOP_K = 100`。
-  - `DEFAULT_RERANK_CANDIDATE_CAP = 0`。
-  - Milvus 默认字段为 `chunk_id`、`vector`，默认 metric 为 `COSINE`。
-  - Milvus 默认索引为 `HNSW`，参数为 `M=16`、`efConstruction=200`。
-  - Milvus 默认 search params 为 `{"metric_type": "COSINE", "params": {}}`。
-  - Milvus 默认 `title.max_length = 65535`，`text.max_length` 保持 `65535`。
-- Benchmark / retrieval 默认参数
-  - `BenchmarkSettingSpec.top_k` 默认改为 `100`。
-  - `RetrievalRunConfig.top_k` 默认改为 `100`。
-  - E1-E4 默认 setting 不显式传 `top_k` 时继承 `100`。
-  - hybrid 默认保持 `hybrid_per_source_topk=50`、`rrf_path_topk=25`。
-  - rerank 默认保持 `rerank_cross_path_topk=50`、`rerank_candidate_cap=0`。
-- Milvus ingest 默认参数
-  - 未显式配置 `index_params` 时，创建 HNSW/COSINE/M=16/efConstruction=200 索引。
-  - manifest metadata 和 fingerprint 使用解析后的有效 index params。
-  - 显式配置 `index_params` 时仍允许覆盖默认值。
-- Milvus retrieval 默认参数
-  - 查询时默认传完整 `search_params={"metric_type": "COSINE", "params": {}}`。
-  - 显式 `search_params` 仍可覆盖 nested `params`。
-- Schema 默认参数
-  - `default_milvus_schema()` 的 `title.max_length` 默认改为 `65535`。
-  - 不给 `vector_dim` 设置默认值，仍必须来自 embedding manifest 或显式配置。
-- 文档
-  - 更新 `README.md`、`config.example.yaml`、`docs/architecture.md`、`docs/operations/e1_e4_benchmark_suite.md`，记录 Sciverse benchmark v1 默认协议。
+- 新增共享默认值：
+  - `DEFAULT_METRICS_K_VALUES = (5, 10, 20)`
+  - `DEFAULT_MAIN_SCORE_METRIC = "recall_at_10"`
+  - `default_metrics_k_values()`
+- `MetricsRunConfig.k_values` 默认改为 `[5, 10, 20]`。
+- `MetricsRunData.main_score_metric` 默认改为 `recall_at_10`。
+- `BenchmarkSuiteRunConfig.metrics_k_values` 默认改为 `[5, 10, 20]`。
+- `ExperimentRunConfig.metrics_k_values` 默认改为 `[5, 10, 20]`。
+- experiment planner 构造 metrics fingerprint 时使用共享 `DEFAULT_MAIN_SCORE_METRIC`，避免 plan/reuse 和真实 metrics run 的 fingerprint 不一致。
 
 ## 3. 行为语义
 
-- 当前 main 默认 benchmark retrieval 深度从旧的 `top_k=10` 改为 `top_k=100`。
-- Milvus 默认从未显式指定索引类型的行为收敛到 HNSW/COSINE/M=16/efConstruction=200。
-- Milvus search params 默认使用完整结构，避免空 dict 在不同 pymilvus/Milvus 版本上的解释差异。
-- `rerank_candidate_cap=0` 表示不额外截断 rerank 候选集，由前序 RRF 候选规模决定。
-- `vector_dim` 不默认 1024，避免把 bge-m3 的维度误写成平台级默认。
+- 默认实验优先比较：
+  - `recall_at_5`
+  - `recall_at_10`
+  - `recall_at_20`
+- 默认主指标是 `recall_at_10`。
+- 显式传入 `k_values` / `metrics_k_values` 的旧实验仍保持可覆盖能力。
+- 如果要复现历史 README 表格中的 `ndcg10`、`mrr10`、`r100`，需要显式传入对应 cutoff。
+- 本轮不改变 retrieval top_k、Milvus 默认索引、rerank 参数、trace 策略或 metric 公式。
 
 ## 4. 测试覆盖
 
 新增/更新测试覆盖：
 
-- Benchmark setting 默认值为 Sciverse benchmark v1 口径。
-- Retrieval run config 默认值为 Sciverse benchmark v1 口径。
-- E1-E4 默认 settings 继承 `top_k=100` 和 `rerank_candidate_cap=0`。
-- Milvus ingest 默认创建 HNSW/COSINE/M=16/efConstruction=200 索引。
-- Milvus ingest manifest/fingerprint 记录解析后的有效 index params。
-- Milvus ingest 支持显式 index params 覆盖默认值。
-- Milvus schema 默认字段和 max_length 符合新协议。
-- Milvus retrieval 默认传完整 search params。
-- Experiment runner 复用路径的默认 retrieval top_k 断言更新为 100。
+- `MetricsRunConfig` 默认 `k_values == [5, 10, 20]`。
+- 默认 metrics run 输出 `recall_at_5/10/20`，且 `main_score == aggregate["recall_at_10"]`。
+- `BenchmarkSuiteRunConfig` 默认 `metrics_k_values == [5, 10, 20]`。
+- `ExperimentRunConfig` 默认 `metrics_k_values == [5, 10, 20]`。
+- benchmark / suite summary 的默认 `main_score_metric` 更新为 `recall_at_10`。
 
 ## 5. 验证结果
 
-开发 session 已运行：
+已运行：
 
 ```bash
-PYTHONPATH=src python -m pytest tests/benchmark/test_settings.py tests/retrieval/test_runner.py tests/retrieval/test_milvus_adapter.py tests/indexes/test_milvus_ingest.py tests/config/test_load.py
-PYTHONPATH=src python -m pytest
-git ls-files '*.py' | xargs ruff check
+env PYTHONPATH=src pytest tests/metrics tests/benchmark tests/experiments tests/assets
+env PYTHONPATH=src pytest
+ruff check .
 mypy .
 ```
 
 结果：
 
-- `77 passed`
-- `710 passed`
-- `ruff`: `All checks passed!`
-- `mypy`: `Success: no issues found in 194 source files`
-
-说明：
-
-- 本地工作区存在未提交实验脚本，`ruff check .` 会扫描这些非本轮文件并失败；本轮对 git 跟踪的 Python 文件执行了 ruff。
-- 当前环境原始缺少 `ruff`、`mypy` 和 `types-PyYAML`，开发 session 已安装 dev 检查依赖后完成验证。
+- `tests/metrics tests/benchmark tests/experiments tests/assets`: `126 passed`
+- 全量测试：`714 passed`
+- `ruff check .`: `All checks passed!`
+- `mypy .`: `Success: no issues found in 188 source files`
 
 ## 6. 未实现项
 
-- 未把 `vector_dim=1024` 写入默认值；这是有意保持，维度仍来自 embedding manifest 或显式配置。
-- 未合入此前复现实验脚本和实验结果文档；这些是实验资产，不属于本轮默认参数固化代码。
+- 未实现报告比较视图或图表层的 recall@5/10/20 专门展示。
+- 未移除历史结果中的 `ndcg10`、`mrr10`、`r100` 表格；这些仍用于历史 baseline 对齐。

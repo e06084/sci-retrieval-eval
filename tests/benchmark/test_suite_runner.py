@@ -202,6 +202,16 @@ def test_suite_config_validates_query_limit() -> None:
         _suite_config(query_limit=-1)
 
 
+def test_suite_config_uses_default_recall_focus() -> None:
+    config = BenchmarkSuiteRunConfig(
+        suite_run_id="suite-defaults",
+        datasets=[_dataset()],
+        settings=settings_for_selection("E2-es"),
+    )
+
+    assert config.metrics_k_values == [5, 10, 20]
+
+
 def test_build_benchmark_run_config_generates_stable_artifact_ids() -> None:
     config = _suite_config(settings=settings_for_selection("E3-hybrid"))
     item = build_benchmark_run_config(
@@ -305,7 +315,7 @@ def test_run_benchmark_suite_runs_items_and_writes_stable_summary(
         ("ds2", "E2-es"),
         ("ds2", "E3-hybrid"),
     ]
-    assert all(item.main_score_metric == "ndcg_at_10" for item in summary.items)
+    assert all(item.main_score_metric == "recall_at_10" for item in summary.items)
     assert [(dep.artifact_type, dep.artifact_id) for dep in manifest.dependencies] == [
         ("benchmark_run", item.benchmark_run_artifact_id)
         for item in summary.items

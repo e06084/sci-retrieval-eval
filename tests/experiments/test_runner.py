@@ -69,6 +69,25 @@ class FakeElasticsearchClient:
         return list(hits)
 
 
+def test_experiment_run_config_uses_default_recall_focus() -> None:
+    config = ExperimentRunConfig(
+        experiment_run_id="exp-defaults",
+        datasets=[
+            BenchmarkDatasetSpec(
+                dataset_key="ds1",
+                normalized_dataset_artifact_id="normalized-ds1",
+                elasticsearch_index_artifact_id="ds-es",
+                milvus_collection_artifact_id="ds-milvus",
+                index_name="ds-index",
+                collection_name="ds-collection",
+            )
+        ],
+        settings=settings_for_selection("E2-es"),
+    )
+
+    assert config.metrics_k_values == [5, 10, 20]
+
+
 def test_run_experiment_creates_missing_then_reuses_by_catalog(
     tmp_path: Path,
 ) -> None:

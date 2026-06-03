@@ -34,6 +34,7 @@ from eval_platform.benchmark import (
     write_benchmark_run_from_existing_artifacts,
 )
 from eval_platform.chunking.progress import ProgressReporter, report_progress
+from eval_platform.defaults import DEFAULT_MAIN_SCORE_METRIC
 from eval_platform.embeddings import EmbeddingClient
 from eval_platform.experiments.artifact import write_experiment_run_artifact
 from eval_platform.experiments.corpus_assets import (
@@ -632,7 +633,7 @@ def _build_metrics_fingerprint_from_expected_retrieval(
         metrics_entrypoint="eval_platform.metrics.runner.run_metrics",
         metric_params={
             "k_values": config.k_values,
-            "main_metric": "ndcg_at_10",
+            "main_metric": DEFAULT_MAIN_SCORE_METRIC,
             "projection": {
                 "from": "chunk",
                 "to": "doc",

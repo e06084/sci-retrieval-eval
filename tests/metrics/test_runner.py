@@ -95,6 +95,37 @@ def _config(**overrides: object) -> MetricsRunConfig:
     return MetricsRunConfig(**payload)
 
 
+def test_metrics_run_config_uses_default_recall_focus() -> None:
+    config = MetricsRunConfig(
+        source_normalized_dataset_artifact_id="normalized-1",
+        source_retrieval_run_artifact_id="retrieval-1",
+        output_artifact_id="metrics-1",
+    )
+
+    assert config.k_values == [5, 10, 20]
+
+
+def test_run_metrics_defaults_to_recall_at_5_10_20_focus(
+    store: LocalArtifactStore,
+) -> None:
+    run_metrics(
+        store,
+        store,
+        MetricsRunConfig(
+            source_normalized_dataset_artifact_id="normalized-1",
+            source_retrieval_run_artifact_id="retrieval-1",
+            output_artifact_id="metrics-default",
+        ),
+    )
+
+    data = read_metrics_run_artifact(store, "metrics-default")
+
+    assert data.k_values == [5, 10, 20]
+    assert data.main_score_metric == "recall_at_10"
+    assert data.main_score == pytest.approx(data.aggregate["recall_at_10"])
+    assert {"recall_at_5", "recall_at_10", "recall_at_20"} <= set(data.aggregate)
+
+
 def test_metrics_run_config_sorts_and_dedupes_k_values() -> None:
     config = _config(k_values=[10, 1, 1, 3])
 
@@ -117,6 +148,7 @@ def test_run_metrics_computes_from_normalized_qrels_and_retrieval(
     assert store.is_complete(METRICS_RUN_ARTIFACT_TYPE, "metrics-1") is True
     assert data.aggregate["recall_at_1"] == pytest.approx(1.0 / 3.0)
     assert data.aggregate["hit_rate_at_1"] == pytest.approx(1.0 / 3.0)
+    assert data.main_score_metric == "recall_at_10"
     assert data.query_metrics[0].query_id == "q-1"
     assert data.query_metrics[0].projection_stats.duplicate_doc_hit_count == 1
     assert data.query_metrics[0].projection_stats.missing_doc_id_hit_count == 1

@@ -12,6 +12,7 @@ from eval_platform.artifacts.types import (
     NORMALIZED_DATASET_ARTIFACT_TYPE,
 )
 from eval_platform.benchmark import BenchmarkDatasetSpec, BenchmarkSettingSpec
+from eval_platform.defaults import default_metrics_k_values
 
 
 def _non_empty_string(value: str, field_name: str) -> str:
@@ -70,9 +71,7 @@ class ExperimentRunConfig(BaseModel):
     datasets: list[BenchmarkDatasetSpec] = Field(default_factory=list)
     corpus_assets: ExperimentCorpusAssetConfig | None = None
     settings: list[BenchmarkSettingSpec]
-    metrics_k_values: list[int] = Field(
-        default_factory=lambda: [1, 3, 5, 10, 20, 100, 1000]
-    )
+    metrics_k_values: list[int] = Field(default_factory=default_metrics_k_values)
     query_limit: int | None = Field(default=None, gt=0)
     queries_per_shard: int = Field(default=1000, gt=0)
     reuse_existing: bool = True

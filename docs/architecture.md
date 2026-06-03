@@ -103,6 +103,7 @@ Sciverse benchmark v1 默认协议：
 - retrieval 默认 `top_k=100`。
 - hybrid 默认每路召回 `50`，RRF path topk 为 `25`。
 - rerank 默认 cross-path topk 为 `50`，`rerank_candidate_cap=0` 表示不额外限制总候选数。
+- metrics 默认关注 `recall_at_5`、`recall_at_10`、`recall_at_20`，默认主指标为 `recall_at_10`。
 - Milvus ingest 默认 `HNSW + COSINE + M=16 + efConstruction=200`。
 - Milvus retrieval 默认显式传 `{"metric_type": "COSINE", "params": {}}`。
 - Milvus schema 默认 primary key 为 `chunk_id`，vector field 为 `vector`，`title.max_length=65535`，`text.max_length=65535`。

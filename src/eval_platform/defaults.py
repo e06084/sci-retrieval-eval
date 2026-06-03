@@ -9,6 +9,8 @@ DEFAULT_HYBRID_PER_SOURCE_TOPK = 50
 DEFAULT_RRF_PATH_TOPK = 25
 DEFAULT_RERANK_CROSS_PATH_TOPK = 50
 DEFAULT_RERANK_CANDIDATE_CAP = 0
+DEFAULT_METRICS_K_VALUES = (5, 10, 20)
+DEFAULT_MAIN_SCORE_METRIC = "recall_at_10"
 
 DEFAULT_MILVUS_PRIMARY_KEY_FIELD = "chunk_id"
 DEFAULT_MILVUS_VECTOR_FIELD = "vector"
@@ -40,3 +42,9 @@ def default_milvus_search_params(
         "metric_type": metric_type,
         "params": dict(DEFAULT_MILVUS_SEARCH_PARAMS),
     }
+
+
+def default_metrics_k_values() -> list[int]:
+    """Return fresh default metrics cutoffs for Sciverse benchmark v1."""
+
+    return list(DEFAULT_METRICS_K_VALUES)

@@ -14,6 +14,7 @@ from eval_platform.benchmark.runner import run_benchmark
 from eval_platform.benchmark.schema import BenchmarkRunConfig
 from eval_platform.benchmark.settings import BenchmarkSettingSpec
 from eval_platform.chunking.progress import ProgressReporter, report_progress
+from eval_platform.defaults import default_metrics_k_values
 from eval_platform.embeddings import EmbeddingClient
 from eval_platform.metrics import MetricsRunConfig
 from eval_platform.retrieval import (
@@ -84,9 +85,7 @@ class BenchmarkSuiteRunConfig(BaseModel):
     suite_run_id: str
     datasets: list[BenchmarkDatasetSpec]
     settings: list[BenchmarkSettingSpec]
-    metrics_k_values: list[int] = Field(
-        default_factory=lambda: [1, 3, 5, 10, 20, 100, 1000]
-    )
+    metrics_k_values: list[int] = Field(default_factory=default_metrics_k_values)
     query_limit: int | None = Field(default=None, gt=0)
     queries_per_shard: int = Field(default=1000, gt=0)
     created_by: str | None = None

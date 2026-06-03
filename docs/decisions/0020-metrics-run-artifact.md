@@ -52,11 +52,15 @@ Implemented metrics:
 - `mrr_at_k`
 - `hit_rate_at_k`
 
-Default `k_values` are:
+Default `k_values` now focus on recall at shallow cutoffs:
 
 ```text
-[1, 3, 5, 10, 20, 100, 1000]
+[5, 10, 20]
 ```
+
+The default benchmark main score is `recall_at_10`. Callers can still pass explicit
+`k_values` to compute broader diagnostic metrics such as `ndcg_at_10`, `mrr_at_10`,
+or `recall_at_100` for historical comparisons.
 
 Queries with missing retrieval results or retrieval errors are evaluated with empty results and
 therefore zero metrics. Retrieval results not present in positive qrels are ignored and counted.

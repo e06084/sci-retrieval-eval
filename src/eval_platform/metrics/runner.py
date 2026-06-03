@@ -19,6 +19,7 @@ from eval_platform.datasets import (
     NormalizedDataset,
     read_normalized_dataset_artifact,
 )
+from eval_platform.defaults import DEFAULT_MAIN_SCORE_METRIC, default_metrics_k_values
 from eval_platform.metrics.artifact import METRICS_RUN_ARTIFACT_TYPE, write_metrics_run_artifact
 from eval_platform.metrics.ir import aggregate_query_metrics, compute_query_metrics
 from eval_platform.metrics.projection import project_retrieval_result_to_docs
@@ -34,7 +35,7 @@ from eval_platform.retrieval import (
     read_retrieval_run_artifact,
 )
 
-MAIN_SCORE_METRIC = "ndcg_at_10"
+MAIN_SCORE_METRIC = DEFAULT_MAIN_SCORE_METRIC
 
 
 def _non_empty_string(value: str, field_name: str) -> str:
@@ -49,7 +50,7 @@ class MetricsRunConfig(BaseModel):
     source_normalized_dataset_artifact_id: str
     source_retrieval_run_artifact_id: str
     output_artifact_id: str
-    k_values: list[int] = Field(default_factory=lambda: [1, 3, 5, 10, 20, 100, 1000])
+    k_values: list[int] = Field(default_factory=default_metrics_k_values)
     doc_aggregation: Literal["first_chunk_rank"] = "first_chunk_rank"
     doc_score: Literal["reciprocal_first_chunk_rank"] = "reciprocal_first_chunk_rank"
     queries_per_shard: int = Field(default=1000, gt=0)

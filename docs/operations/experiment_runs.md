@@ -48,6 +48,19 @@ collection_name
 判断。实验 runner 只消费 corpus assets；如果 normalized / ES / Milvus 缺失，会在
 计划阶段明确失败，要求先运行 corpus asset 准备流程。
 
+## Metrics Defaults
+
+默认实验关注浅层召回能力：
+
+```text
+metrics_k_values = [5, 10, 20]
+main_score_metric = recall_at_10
+```
+
+也就是说，默认报告优先比较 `recall_at_5`、`recall_at_10`、`recall_at_20`。如果需要和历史
+README baseline 对比 `ndcg10`、`mrr10`、`r100`，或者需要更深的 recall cutoff，必须在
+`ExperimentRunConfig.metrics_k_values` 中显式传入对应 cutoff。
+
 ## 复用规则
 
 `run_experiment` 会按顺序处理每个 dataset x setting：
