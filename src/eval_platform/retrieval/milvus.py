@@ -8,6 +8,12 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from eval_platform.config import MilvusConfig
+from eval_platform.defaults import (
+    DEFAULT_MILVUS_METRIC_TYPE,
+    DEFAULT_MILVUS_PRIMARY_KEY_FIELD,
+    DEFAULT_MILVUS_VECTOR_FIELD,
+    default_milvus_search_params,
+)
 from eval_platform.retrieval.schema import RetrievalHit
 
 _DEFAULT_OUTPUT_FIELDS = [
@@ -34,10 +40,10 @@ class PymilvusRetrievalClientConfig(BaseModel):
     username: str | None = None
     password: str | None = None
     db_name: str | None = None
-    primary_key_field: str = "chunk_id"
-    vector_field: str = "vector"
+    primary_key_field: str = DEFAULT_MILVUS_PRIMARY_KEY_FIELD
+    vector_field: str = DEFAULT_MILVUS_VECTOR_FIELD
     output_fields: list[str] = Field(default_factory=lambda: list(_DEFAULT_OUTPUT_FIELDS))
-    metric_type: str = "COSINE"
+    metric_type: str = DEFAULT_MILVUS_METRIC_TYPE
     search_params: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("address", "primary_key_field", "vector_field", "metric_type")
@@ -95,10 +101,10 @@ class PymilvusRetrievalClient:
             anns_field=self._config.vector_field,
             limit=top_k,
             output_fields=self._config.output_fields,
-            search_params={
-                "metric_type": self._config.metric_type,
-                "params": dict(self._config.search_params),
-            },
+            search_params=default_milvus_search_params(
+                metric_type=self._config.metric_type,
+            )
+            | {"params": dict(self._config.search_params)},
         )
         return [_hit_from_milvus_hit(hit, self._config) for hit in _first_result_set(result)]
 

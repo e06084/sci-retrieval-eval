@@ -26,6 +26,16 @@ from eval_platform.assets import (
 from eval_platform.chunking import CHUNKED_CORPUS_ARTIFACT_TYPE, ChunkRecord, iter_chunk_shards
 from eval_platform.chunking.artifact import ChunkShard
 from eval_platform.chunking.progress import ProgressReporter, report_progress
+from eval_platform.defaults import (
+    DEFAULT_MILVUS_HNSW_PARAMS,
+    DEFAULT_MILVUS_INDEX_TYPE,
+    DEFAULT_MILVUS_METRIC_TYPE,
+    DEFAULT_MILVUS_PRIMARY_KEY_FIELD,
+    DEFAULT_MILVUS_TEXT_MAX_LENGTH,
+    DEFAULT_MILVUS_TITLE_MAX_LENGTH,
+    DEFAULT_MILVUS_VECTOR_FIELD,
+    default_milvus_index_params,
+)
 from eval_platform.embeddings import (
     EMBEDDINGS_ARTIFACT_TYPE,
     EmbeddingRecord,
@@ -33,8 +43,8 @@ from eval_platform.embeddings import (
 )
 from eval_platform.embeddings.artifact import EmbeddingShard
 
-DEFAULT_PRIMARY_KEY_FIELD = "chunk_id"
-DEFAULT_VECTOR_FIELD = "vector"
+DEFAULT_PRIMARY_KEY_FIELD = DEFAULT_MILVUS_PRIMARY_KEY_FIELD
+DEFAULT_VECTOR_FIELD = DEFAULT_MILVUS_VECTOR_FIELD
 _SENSITIVE_METADATA_KEY_PARTS = (
     "access_key",
     "api_key",
@@ -122,7 +132,7 @@ class MilvusIngestConfig(BaseModel):
     vector_dim: int | None = Field(default=None, gt=0)
     primary_key_field: str = DEFAULT_PRIMARY_KEY_FIELD
     vector_field: str = DEFAULT_VECTOR_FIELD
-    metric_type: str = "COSINE"
+    metric_type: str = DEFAULT_MILVUS_METRIC_TYPE
     index_params: dict[str, Any] = Field(default_factory=dict)
     schema_: dict[str, Any] | None = Field(default=None, alias="schema")
     created_by: str | None = None
@@ -295,12 +305,17 @@ class PymilvusMilvusClient:
 
         vector_field = _find_vector_field_name(schema)
         raw_params = dict(index_params)
-        index_type = str(raw_params.pop("index_type", "AUTOINDEX")).upper()
-        metric_type = str(raw_params.pop("metric_type", "COSINE")).upper()
+        defaults = default_milvus_index_params()
+        index_type = str(raw_params.pop("index_type", defaults["index_type"])).upper()
+        metric_type = str(raw_params.pop("metric_type", defaults["metric_type"])).upper()
         index_name = str(raw_params.pop("index_name", ""))
         params = raw_params.pop("params", None)
         if params is None:
-            params = {}
+            params = (
+                dict(defaults["params"])
+                if index_type == DEFAULT_MILVUS_INDEX_TYPE
+                else {}
+            )
         if not isinstance(params, dict):
             raise MilvusIngestError("Milvus index params.params must be a mapping")
 
@@ -335,8 +350,13 @@ def default_milvus_schema(
                 "max_length": 512,
             },
             {"name": "doc_id", "dtype": "VARCHAR", "max_length": 512},
-            {"name": "title", "dtype": "VARCHAR", "max_length": 4096, "nullable": True},
-            {"name": "text", "dtype": "VARCHAR", "max_length": 65535},
+            {
+                "name": "title",
+                "dtype": "VARCHAR",
+                "max_length": DEFAULT_MILVUS_TITLE_MAX_LENGTH,
+                "nullable": True,
+            },
+            {"name": "text", "dtype": "VARCHAR", "max_length": DEFAULT_MILVUS_TEXT_MAX_LENGTH},
             {"name": "chunk_index", "dtype": "INT64"},
             {"name": "start_offset", "dtype": "INT64", "nullable": True},
             {"name": "end_offset", "dtype": "INT64", "nullable": True},
@@ -495,9 +515,7 @@ def run_milvus_ingest(
         vector_field=config.vector_field,
     )
     schema_sha256 = stable_schema_sha256(schema)
-    index_params = dict(config.index_params)
-    if "metric_type" not in index_params:
-        index_params["metric_type"] = config.metric_type
+    index_params = _resolve_index_params(config)
 
     collection_exists = client.collection_exists(config.collection_name)
     if collection_exists and not config.overwrite_existing:
@@ -775,7 +793,7 @@ def _milvus_asset_fingerprint_components(
     if chunked_corpus_fingerprint is None or embeddings_fingerprint is None:
         return None
 
-    index_type = str(index_params.get("index_type", "AUTOINDEX"))
+    index_type = str(index_params.get("index_type", DEFAULT_MILVUS_INDEX_TYPE))
     fingerprint_index_params = {
         key: value
         for key, value in index_params.items()
@@ -797,3 +815,27 @@ def _milvus_asset_fingerprint_components(
         index_type=index_type,
         index_params=fingerprint_index_params,
     )
+
+
+def _resolve_index_params(config: MilvusIngestConfig) -> dict[str, Any]:
+    if not config.index_params:
+        index_params = default_milvus_index_params()
+        index_params["metric_type"] = config.metric_type
+        return index_params
+
+    index_params = dict(config.index_params)
+    nested_params = index_params.pop("params", None)
+    index_params.setdefault("index_type", DEFAULT_MILVUS_INDEX_TYPE)
+    index_params.setdefault("metric_type", config.metric_type)
+    index_type = str(index_params["index_type"]).upper()
+    if nested_params is None:
+        index_params["params"] = (
+            dict(DEFAULT_MILVUS_HNSW_PARAMS)
+            if index_type == DEFAULT_MILVUS_INDEX_TYPE
+            else {}
+        )
+    else:
+        if not isinstance(nested_params, dict):
+            raise MilvusIngestError("Milvus index params.params must be a mapping")
+        index_params["params"] = nested_params
+    return index_params

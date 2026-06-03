@@ -48,6 +48,12 @@ search_runtime:
     timeout_sec: 60
     temperature: 0
     max_tokens: 1024
+  search:
+    top_k: 100
+    hybrid_per_source_topk: 50
+    rrf_path_topk: 25
+    rerank_cross_path_topk: 50
+    rerank_candidate_cap: 0
 
 raw_sources:
   IFIRNFCorpus:

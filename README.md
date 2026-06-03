@@ -233,7 +233,7 @@ main 分支当前的实验抽象是 Python API，不是正式 CLI。推荐流程
 | E3-hybrid | `hybrid` | ES + Milvus + RRF |
 | E4-hybrid-rerank | `hybrid` + rerank | E3 候选后 rerank |
 
-与历史旧实验对齐时使用：
+当前 main 的 `Sciverse benchmark v1` 默认协议：
 
 - `top_k=100`，对应旧实验 `search_limit=100`。
 - `hybrid_per_source_topk=50`
@@ -242,6 +242,13 @@ main 分支当前的实验抽象是 Python API，不是正式 CLI。推荐流程
 - `rerank_candidate_cap=0`
 - `sub_queries=0`
 - `rewrite_enabled=false`
+- Milvus index 默认 `HNSW + COSINE + M=16 + efConstruction=200`。
+- Milvus search params 默认显式传 `{"metric_type": "COSINE", "params": {}}`。
+- Milvus schema 默认 `title.max_length=65535`，用于兼容 LitSearch 长标题；`text.max_length=65535`。
+- embedding 维度不属于平台默认值，必须来自 embedding manifest 或显式配置。当前 `BAAI/bge-m3` 资产维度为 1024，但不应在 Milvus 层硬编码。
+
+与 2026-05-29 README baseline 对齐时还使用：
+
 - embedding endpoint index `1`，当前为 `3886`
 - rerank endpoint index `1`，当前为 `3886`
 
@@ -354,7 +361,7 @@ max absolute delta = 0
 
 ## 与历史结果的关系
 
-历史旧实验 `no3888-e1e4-20260522` 使用 `search_limit=100`。新系统默认 `top_k=10` 时不可直接比较；对齐为 `top_k=100` 后，大部分数据集和 setting 已接近旧结果。
+历史旧实验 `no3888-e1e4-20260522` 使用 `search_limit=100`。当前主线默认 `top_k=100`，可直接按 Sciverse benchmark v1 口径比较。
 
 当前仍存在部分差异，主要原因不是重复性问题，而是旧资产和旧服务状态不可完全复现：
 
@@ -362,5 +369,6 @@ max absolute delta = 0
 - 旧 chunker commit 与当前 chunker commit 不同。
 - 旧 rerank 服务版本或 endpoint 行为没有被完整记录为 replay artifact。
 - 当前 3888 rerank endpoint 在新系统 adapter 下不可用，3886 可稳定复跑。
+- 新建 Milvus collection 默认 `title.max_length=65535`，其 schema fingerprint 会不同于部分旧 collection 的 `title.max_length=4096`；这是为了兼容 LitSearch 长标题的预期变化。
 
 因此，当前系统已能保证“同一资产 + 同一配置 + 同一外部 API 行为”下的结果一致；完全复现历史旧实验还需要历史资产和外部服务状态也可审计。

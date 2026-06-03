@@ -46,10 +46,29 @@ E4-hybrid-rerank: Milvus + ES + RRF + rerank, no rewrite
 Baseline 必须保持：
 
 ```text
+top_k = 100
+hybrid_per_source_topk = 50
+rrf_path_topk = 25
+rerank_cross_path_topk = 50
+rerank_candidate_cap = 0
 trace_mode = replay
 ```
 
 不要在 baseline 中关闭 trace。trace 是后续 replay、排查失败 query、比较 setting 行为的基础审计数据。
+
+Milvus collection 建议使用 Sciverse benchmark v1 默认协议：
+
+```text
+index_type = HNSW
+metric_type = COSINE
+index params = {"M": 16, "efConstruction": 200}
+search params = {"metric_type": "COSINE", "params": {}}
+primary key = chunk_id
+vector field = vector
+title.max_length = 65535
+```
+
+`vector_dim` 不应写成固定默认值；它必须来自 embedding artifact manifest 或显式配置。
 
 ## 3. 推荐执行顺序
 

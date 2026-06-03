@@ -92,7 +92,7 @@ def test_run_experiment_creates_missing_then_reuses_by_catalog(
         "metrics_run": "create",
         "benchmark_run": "create",
     }
-    assert es_client.search_calls == [("ds-index", "alpha", 10)]
+    assert es_client.search_calls == [("ds-index", "alpha", 100)]
     assert {
         (record.artifact_type, record.artifact_id)
         for record in catalog_records
@@ -195,7 +195,7 @@ def test_run_experiment_creates_missing_from_corpus_asset_selection(
         "benchmark_run": "create",
     }
     assert es_client.search_calls == [
-        (f"ifir_nfcorpus_{run_id}_es", "alpha", 10)
+        (f"ifir_nfcorpus_{run_id}_es", "alpha", 100)
     ]
 
 

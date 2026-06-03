@@ -7,6 +7,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
+from eval_platform.defaults import (
+    DEFAULT_HYBRID_PER_SOURCE_TOPK,
+    DEFAULT_RERANK_CANDIDATE_CAP,
+    DEFAULT_RERANK_CROSS_PATH_TOPK,
+    DEFAULT_RETRIEVAL_TOP_K,
+    DEFAULT_RRF_PATH_TOPK,
+)
+
 
 def _non_empty_string(value: str, field_name: str) -> str:
     if not value.strip():
@@ -22,11 +30,11 @@ class BenchmarkSettingSpec(BaseModel):
     sub_queries: int = Field(default=0, ge=0)
     rewrite_enabled: bool = False
     rerank_enabled: bool = False
-    top_k: int = Field(default=10, gt=0)
-    hybrid_per_source_topk: int = Field(default=50, gt=0)
-    rrf_path_topk: int = Field(default=25, gt=0)
-    rerank_cross_path_topk: int = Field(default=50, ge=0)
-    rerank_candidate_cap: int = Field(default=0, ge=0)
+    top_k: int = Field(default=DEFAULT_RETRIEVAL_TOP_K, gt=0)
+    hybrid_per_source_topk: int = Field(default=DEFAULT_HYBRID_PER_SOURCE_TOPK, gt=0)
+    rrf_path_topk: int = Field(default=DEFAULT_RRF_PATH_TOPK, gt=0)
+    rerank_cross_path_topk: int = Field(default=DEFAULT_RERANK_CROSS_PATH_TOPK, ge=0)
+    rerank_candidate_cap: int = Field(default=DEFAULT_RERANK_CANDIDATE_CAP, ge=0)
     trace_mode: Literal["replay", "none"] = "replay"
     metadata: dict[str, Any] = Field(default_factory=dict)
 

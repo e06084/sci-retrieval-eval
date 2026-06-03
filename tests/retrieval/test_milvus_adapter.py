@@ -112,6 +112,18 @@ def test_pymilvus_retrieval_client_calls_search_and_parses_hits() -> None:
     assert "vector" not in hits[0].metadata
 
 
+def test_pymilvus_retrieval_client_uses_complete_default_search_params() -> None:
+    fake = FakeMilvusClient()
+    client = PymilvusRetrievalClient(
+        PymilvusRetrievalClientConfig(address="http://milvus.example:19530"),
+        client=fake,
+    )
+
+    client.search("chunks", [1.0, 2.0], 10)
+
+    assert fake.calls[0]["search_params"] == {"metric_type": "COSINE", "params": {}}
+
+
 def test_pymilvus_retrieval_client_falls_back_to_hit_id() -> None:
     client = PymilvusRetrievalClient(
         PymilvusRetrievalClientConfig(address="http://milvus.example:19530"),

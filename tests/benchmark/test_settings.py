@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from eval_platform.benchmark import DEFAULT_E1_E4_SETTINGS, settings_for_selection
+from eval_platform.benchmark import (
+    DEFAULT_E1_E4_SETTINGS,
+    BenchmarkSettingSpec,
+    settings_for_selection,
+)
 
 
 def test_default_e1_e4_settings_order_and_values() -> None:
@@ -28,6 +32,20 @@ def test_default_e1_e4_settings_order_and_values() -> None:
         ("hybrid", 0, False, False),
         ("hybrid", 0, False, True),
     ]
+    assert [setting.top_k for setting in DEFAULT_E1_E4_SETTINGS] == [100, 100, 100, 100]
+    assert [setting.rerank_candidate_cap for setting in DEFAULT_E1_E4_SETTINGS] == [
+        0,
+        0,
+        0,
+        0,
+    ]
+
+
+def test_benchmark_setting_spec_uses_sciverse_v1_defaults() -> None:
+    setting = BenchmarkSettingSpec(setting_key="demo", retrieval_mode="hybrid")
+
+    assert setting.top_k == 100
+    assert setting.rerank_candidate_cap == 0
 
 
 def test_settings_for_selection_supports_all_and_keys() -> None:

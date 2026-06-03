@@ -170,6 +170,22 @@ class RecordingRerankTransport:
         return self._responses[len(self.calls) - 1]
 
 
+def test_retrieval_run_config_uses_sciverse_v1_defaults() -> None:
+    config = RetrievalRunConfig(
+        source_normalized_dataset_artifact_id="normalized-1",
+        output_artifact_id="retrieval-1",
+        retrieval_mode="hybrid",
+        elasticsearch_index_artifact_id="es-artifact",
+        milvus_collection_artifact_id="milvus-artifact",
+    )
+
+    assert config.top_k == 100
+    assert config.hybrid_per_source_topk == 50
+    assert config.rrf_path_topk == 25
+    assert config.rerank_cross_path_topk == 50
+    assert config.rerank_candidate_cap == 0
+
+
 def _config(**overrides: Any) -> RetrievalRunConfig:
     payload: dict[str, Any] = {
         "source_normalized_dataset_artifact_id": "normalized-1",

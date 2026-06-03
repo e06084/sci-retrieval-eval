@@ -312,9 +312,46 @@ def test_run_milvus_ingest_creates_collection_with_default_schema(
         (
             "litsearch_milvus",
             default_milvus_schema(vector_dim=2),
-            {"metric_type": "COSINE"},
+            {
+                "index_type": "HNSW",
+                "metric_type": "COSINE",
+                "params": {"M": 16, "efConstruction": 200},
+            },
         )
     ]
+
+
+def test_default_milvus_schema_uses_sciverse_v1_field_defaults() -> None:
+    schema = default_milvus_schema(vector_dim=7)
+
+    fields = {field["name"]: field for field in schema["fields"]}
+    assert fields["chunk_id"]["is_primary"] is True
+    assert fields["vector"]["dtype"] == "FLOAT_VECTOR"
+    assert fields["vector"]["dim"] == 7
+    assert fields["title"]["max_length"] == 65535
+    assert fields["text"]["max_length"] == 65535
+
+
+def test_run_milvus_ingest_allows_explicit_index_params_override(
+    chunk_store: LocalArtifactStore,
+    embedding_store: LocalArtifactStore,
+    output_store: LocalArtifactStore,
+) -> None:
+    client = FakeMilvusClient()
+
+    run_milvus_ingest(
+        chunk_store,
+        embedding_store,
+        output_store,
+        _config(index_params={"index_type": "AUTOINDEX", "metric_type": "IP"}),
+        client,
+    )
+
+    assert client.created_collections[0][2] == {
+        "index_type": "AUTOINDEX",
+        "metric_type": "IP",
+        "params": {},
+    }
 
 
 def test_run_milvus_ingest_rejects_existing_collection_without_overwrite(
@@ -626,6 +663,11 @@ def test_run_milvus_ingest_writes_manifest_dependencies_and_metadata(
     assert manifest.metadata["vector_field"] == "vector"
     assert manifest.metadata["vector_dim"] == 2
     assert manifest.metadata["metric_type"] == "COSINE"
+    assert manifest.metadata["index_params"] == {
+        "index_type": "HNSW",
+        "metric_type": "COSINE",
+        "params": {"M": 16, "efConstruction": 200},
+    }
     assert manifest.metadata["inserted_count"] == 3
     assert manifest.metadata["failed_count"] == 0
     assert manifest.metadata["verified_entity_count"] == 3
@@ -642,6 +684,28 @@ def test_run_milvus_ingest_writes_manifest_dependencies_and_metadata(
     assert manifest.metadata["stage"] == "milvus"
     assert "password" not in manifest.metadata
     assert "api_token" not in manifest.metadata
+
+
+def test_milvus_fingerprint_components_record_effective_index_params() -> None:
+    components = milvus_module._milvus_asset_fingerprint_components(
+        config=_config(),
+        chunked_corpus_fingerprint="chunk-fp",
+        embeddings_fingerprint="embedding-fp",
+        schema=default_milvus_schema(vector_dim=2),
+        index_params={
+            "index_type": "HNSW",
+            "metric_type": "COSINE",
+            "params": {"M": 16, "efConstruction": 200},
+        },
+    )
+
+    assert components is not None
+    assert components["index_type"] == "HNSW"
+    assert components["metric_type"] == "COSINE"
+    assert components["index_params"] == {
+        "metric_type": "COSINE",
+        "params": {"M": 16, "efConstruction": 200},
+    }
 
 
 def test_run_milvus_ingest_manifest_does_not_record_connection_secrets(

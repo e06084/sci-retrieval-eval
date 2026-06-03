@@ -98,6 +98,18 @@ retrieval 执行和 metrics 计算必须分离：
 
 默认 trace 策略是完整记录，便于 replay 和排查随机性。若要省空间，必须显式选择 `trace_mode=none`。
 
+Sciverse benchmark v1 默认协议：
+
+- retrieval 默认 `top_k=100`。
+- hybrid 默认每路召回 `50`，RRF path topk 为 `25`。
+- rerank 默认 cross-path topk 为 `50`，`rerank_candidate_cap=0` 表示不额外限制总候选数。
+- Milvus ingest 默认 `HNSW + COSINE + M=16 + efConstruction=200`。
+- Milvus retrieval 默认显式传 `{"metric_type": "COSINE", "params": {}}`。
+- Milvus schema 默认 primary key 为 `chunk_id`，vector field 为 `vector`，`title.max_length=65535`，`text.max_length=65535`。
+- embedding 维度不是平台默认值，必须来自 embedding manifest 或显式配置；当前 bge-m3 的 `1024` 只是具体资产事实。
+
+统一 `title.max_length=65535` 会让新建 Milvus collection 的 schema fingerprint 不同于部分历史旧 collection 的 `title.max_length=4096`，这是为兼容 LitSearch 长标题的预期变化。
+
 ## 7. 当前阶段
 
 当前主线已经覆盖：

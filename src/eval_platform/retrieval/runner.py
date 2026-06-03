@@ -18,6 +18,13 @@ from eval_platform.datasets import (
     NORMALIZED_DATASET_ARTIFACT_TYPE,
     read_normalized_dataset_artifact,
 )
+from eval_platform.defaults import (
+    DEFAULT_HYBRID_PER_SOURCE_TOPK,
+    DEFAULT_RERANK_CANDIDATE_CAP,
+    DEFAULT_RERANK_CROSS_PATH_TOPK,
+    DEFAULT_RETRIEVAL_TOP_K,
+    DEFAULT_RRF_PATH_TOPK,
+)
 from eval_platform.embeddings import EmbeddingClient
 from eval_platform.indexes import ELASTICSEARCH_INDEX_ARTIFACT_TYPE, MILVUS_COLLECTION_ARTIFACT_TYPE
 from eval_platform.retrieval.artifact import (
@@ -57,7 +64,7 @@ class RetrievalRunConfig(BaseModel):
     source_normalized_dataset_artifact_id: str
     output_artifact_id: str
     retrieval_mode: Literal["es", "milvus", "hybrid"] = "hybrid"
-    top_k: int = Field(default=10, gt=0)
+    top_k: int = Field(default=DEFAULT_RETRIEVAL_TOP_K, gt=0)
     query_limit: int | None = Field(default=None, gt=0)
     queries_per_shard: int = Field(default=1000, gt=0)
     trace_mode: Literal["replay", "none"] = "replay"
@@ -73,10 +80,10 @@ class RetrievalRunConfig(BaseModel):
     sub_queries: int = Field(default=0, ge=0)
     rewrite_enabled: bool = False
     rerank_enabled: bool = False
-    hybrid_per_source_topk: int = Field(default=50, gt=0)
-    rrf_path_topk: int = Field(default=10, gt=0)
-    rerank_cross_path_topk: int = Field(default=50, ge=0)
-    rerank_candidate_cap: int = Field(default=0, ge=0)
+    hybrid_per_source_topk: int = Field(default=DEFAULT_HYBRID_PER_SOURCE_TOPK, gt=0)
+    rrf_path_topk: int = Field(default=DEFAULT_RRF_PATH_TOPK, gt=0)
+    rerank_cross_path_topk: int = Field(default=DEFAULT_RERANK_CROSS_PATH_TOPK, ge=0)
+    rerank_candidate_cap: int = Field(default=DEFAULT_RERANK_CANDIDATE_CAP, ge=0)
 
     created_by: str | None = None
     code_git_sha: str | None = None
