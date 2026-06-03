@@ -4,82 +4,70 @@
 
 ## 1. 任务信息
 
-- 任务名：`PR3 / corpus asset reuse planner 使用 asset_fingerprint`
-- 当前分支：`feat/corpus-asset-fingerprint-reuse`
-- 基线：`feat/artifact-fingerprint-writers`，且 PR #40 已合入 `main`
-- 完成时间：2026-05-30
+- 任务名：`metrics 阶段读取 retrieval artifact 时跳过 trace`
+- 当前分支：`feat/skip-retrieval-trace-in-metrics`
+- 基线：本地 `main`
+- 完成时间：2026-06-03
 
 ## 2. 本轮实现
 
-本轮让五数据集 corpus asset dry-run planner 能按逻辑资产 fingerprint 做复用过滤。
+本轮减少 metrics 阶段读取 retrieval artifact 后长期持有的大体积 trace 数据。
 
 改动：
 
-- `inventory_corpus_assets(...)`
-  - manifest summary 增加 `asset_fingerprint_sha256`。
-- `build_plan_for_datasets(...)`
-  - 新增可选参数 `expected_asset_fingerprints_by_slug`。
-  - 当提供 expected fingerprint 时，只复用对应 artifact type 中
-    `metadata_summary.asset_fingerprint_sha256` 匹配的完整 artifact。
-  - 未提供 expected fingerprint 时，保持原有 dependency-chain reuse 行为。
-  - reused step 会暴露 `asset_fingerprint_sha256`，便于审计 dry-run 选择原因。
+- `read_retrieval_run_artifact(...)`
+  - 新增可选参数 `include_trace: bool = True`。
+  - 默认值保持 `True`，兼容 replay、审计和其它需要 trace 的调用方。
+  - 当 `include_trace=False` 时，读取每条 retrieval JSONL 记录后移除 `trace` 字段，再构造 `RetrievalQueryResult`。
+- `run_metrics(...)`
+  - 调用 `read_retrieval_run_artifact(..., include_trace=False)`。
+  - metrics 只需要 `query_id`、`query_text`、`hits`、`error` 等字段，不需要 retrieval trace。
 
 ## 3. 行为语义
 
-新增能力支持后续最小重建：
-
-- 如果 raw / normalized / chunk / ES fingerprint 匹配，但 embedding fingerprint 变化：
-  - 复用 raw / normalized / chunk / ES。
-  - 重新创建 embeddings。
-  - 重新创建 Milvus collection。
-- 如果存在多个 embeddings 或 Milvus collection，planner 会优先选择 fingerprint 匹配且
-  dependency chain 一致的那条链。
-- 如果 expected fingerprint 指向的 artifact 不存在或旧 artifact 没有 fingerprint：
-  - 不复用该 artifact。
-  - planner 回退为 create 对应阶段和依赖它的下游阶段。
+- 默认读取 retrieval artifact 的行为不变，仍保留 trace。
+- metrics 阶段不再把 trace 保存在 `RetrievalQueryResult` 列表中，降低 replay trace 很大时的内存占用。
+- 当前实现仍会读取完整 JSONL shard，并临时 `json.loads` 解析后再丢弃 trace；因此它优化的是长期对象持有和后续 metrics 内存压力，不减少 S3/磁盘读取量，也不完全避免 JSON 解析成本。
 
 ## 4. 测试覆盖
 
 新增/更新：
 
-- `tests/corpus_assets/test_planner.py`
-
-覆盖：
-
-- expected fingerprint 能从同一 chunk chain 中选择目标 embeddings / Milvus。
-- embedding fingerprint 变化时，只复用 raw / normalized / chunk / ES，并重建
-  embeddings / Milvus。
-- 原有不传 expected fingerprint 的 reuse 行为保持不变。
+- `tests/retrieval/test_artifact.py`
+  - 覆盖默认读取保留 trace。
+  - 覆盖 `include_trace=False` 时返回记录的 `trace is None`。
+- `tests/metrics/test_runner.py`
+  - 覆盖 `run_metrics(...)` 调用 retrieval artifact reader 时显式传入 `include_trace=False`。
 
 ## 5. 验证结果
 
-已运行：
+开发 session 已运行：
 
 ```bash
-PYTHONPATH=src pytest tests/corpus_assets/test_planner.py tests/corpus_assets/test_inventory.py tests/scripts/test_build_real_corpus_assets.py
-PYTHONPATH=src pytest tests/corpus_assets tests/scripts/test_build_real_corpus_assets.py tests/assets/test_manifest_fingerprints.py
-ruff check .
-mypy .
+PYTHONPATH=src python -m pytest tests/retrieval/test_artifact.py tests/metrics/test_runner.py
 ```
 
 结果：
 
-- `tests/corpus_assets/test_planner.py tests/corpus_assets/test_inventory.py tests/scripts/test_build_real_corpus_assets.py`
-  - `16 passed`
-- `tests/corpus_assets tests/scripts/test_build_real_corpus_assets.py tests/assets/test_manifest_fingerprints.py`
-  - `25 passed`
+- `10 passed`
+
+验收 session 已反馈通过：
+
+- `env PYTHONPATH=src pytest tests/metrics tests/retrieval`
+  - `81 passed`
+- `env PYTHONPATH=src pytest`
+  - `704 passed`
 - `ruff check .`
-  - `All checks passed!`
+  - 通过
 - `mypy .`
-  - `Success: no issues found in 177 source files`
+  - 通过，`187 source files`
 
 ## 6. 未实现项
 
-按 PR3 范围，本轮未实现：
+本轮未实现更深层的 trace 读取优化：
 
-- expected fingerprint 的自动计算入口。
-- minimal rebuild execute runner。
-- stage override / pinned artifacts。
-- 真实五数据集资产重建。
+- 未把 retrieval artifact 拆成 hits 与 trace 两类独立文件。
+- 未实现流式 metrics 计算。
+- 未减少 S3/磁盘读取完整 JSONL shard 的成本。
 
-下一步是把 PR3 合入后，用最新 `main` 重新生成 5 个 benchmark 的 corpus assets。
+这些属于后续性能优化，不影响本轮功能语义。

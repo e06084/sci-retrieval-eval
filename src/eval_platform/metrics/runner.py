@@ -92,6 +92,7 @@ def run_metrics(
     retrieval_records = read_retrieval_run_artifact(
         source_store,
         config.source_retrieval_run_artifact_id,
+        include_trace=False,
     )
     data = build_metrics_run_data(
         dataset,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -115,6 +116,7 @@ def read_retrieval_run_artifact(
     artifact_id: str,
     *,
     require_complete: bool = True,
+    include_trace: bool = True,
 ) -> list[RetrievalQueryResult]:
     """Read all retrieval result records from a retrieval_run artifact."""
 
@@ -133,5 +135,24 @@ def read_retrieval_run_artifact(
             artifact_id,
             artifact_file.path,
         ).decode("utf-8")
-        records.extend(load_retrieval_results_jsonl(payload))
+        records.extend(_load_retrieval_results_jsonl(payload, include_trace=include_trace))
+    return records
+
+
+def _load_retrieval_results_jsonl(
+    text: str,
+    *,
+    include_trace: bool,
+) -> list[RetrievalQueryResult]:
+    if include_trace:
+        return load_retrieval_results_jsonl(text)
+
+    records: list[RetrievalQueryResult] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if isinstance(payload, dict):
+            payload.pop("trace", None)
+        records.append(RetrievalQueryResult.model_validate(payload))
     return records

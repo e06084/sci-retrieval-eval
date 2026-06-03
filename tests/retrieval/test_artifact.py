@@ -83,6 +83,27 @@ def test_read_retrieval_run_artifact_round_trips_records(store: LocalArtifactSto
     assert loaded[1].error == "failed"
 
 
+def test_read_retrieval_run_artifact_can_skip_trace(store: LocalArtifactStore) -> None:
+    records = [
+        RetrievalQueryResult(
+            query_id="q-1",
+            query_text="query one",
+            hits=[],
+            trace={"rewrite_queries": ["query one"], "final_hits": [{"chunk_id": "chunk-1"}]},
+        )
+    ]
+    write_retrieval_run_artifact(store, "run-1", records, queries_per_shard=2)
+
+    loaded_with_trace = read_retrieval_run_artifact(store, "run-1")
+    loaded_without_trace = read_retrieval_run_artifact(store, "run-1", include_trace=False)
+
+    assert loaded_with_trace[0].trace == {
+        "rewrite_queries": ["query one"],
+        "final_hits": [{"chunk_id": "chunk-1"}],
+    }
+    assert loaded_without_trace[0].trace is None
+
+
 def test_read_retrieval_run_artifact_requires_success(store: LocalArtifactStore) -> None:
     store.put_file(RETRIEVAL_RUN_ARTIFACT_TYPE, "run-1", "results/part-00000.jsonl", b"")
 

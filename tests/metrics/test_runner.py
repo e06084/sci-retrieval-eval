@@ -20,9 +20,11 @@ from eval_platform.metrics import (
     read_metrics_run_artifact,
     run_metrics,
 )
+from eval_platform.metrics import runner as metrics_runner
 from eval_platform.retrieval import (
     RetrievalHit,
     RetrievalQueryResult,
+    read_retrieval_run_artifact,
     write_retrieval_run_artifact,
 )
 
@@ -132,6 +134,27 @@ def test_run_metrics_computes_from_normalized_qrels_and_retrieval(
         ("normalized_dataset", "normalized-1"),
         ("retrieval_run", "retrieval-1"),
     ]
+
+
+def test_run_metrics_reads_retrieval_artifact_without_trace(
+    store: LocalArtifactStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    include_trace_values: list[bool | None] = []
+
+    def read_without_trace_probe(*args: Any, include_trace: bool = True, **kwargs: Any) -> Any:
+        include_trace_values.append(include_trace)
+        return read_retrieval_run_artifact(*args, include_trace=include_trace, **kwargs)
+
+    monkeypatch.setattr(
+        metrics_runner,
+        "read_retrieval_run_artifact",
+        read_without_trace_probe,
+    )
+
+    run_metrics(store, store, _config())
+
+    assert include_trace_values == [False]
 
 
 def test_run_metrics_reports_query_progress(store: LocalArtifactStore) -> None:
