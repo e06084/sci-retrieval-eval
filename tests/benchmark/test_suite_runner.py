@@ -269,12 +269,25 @@ def test_build_benchmark_run_config_maps_e1_to_e4_retrieval_settings() -> None:
     assert e3.retrieval_mode == "hybrid"
     assert e3.elasticsearch_index_artifact_id == "ds1-es-artifact"
     assert e3.milvus_collection_artifact_id == "ds1-milvus-artifact"
+    assert e3.paper_cap == 0
 
     e4 = configs["E4-hybrid-rerank"].retrieval
     assert e4.retrieval_mode == "hybrid"
     assert e4.rerank_enabled is True
     assert e4.rewrite_enabled is False
     assert e4.sub_queries == 0
+
+
+def test_build_benchmark_run_config_passes_setting_paper_cap() -> None:
+    setting = BenchmarkSettingSpec(
+        setting_key="E3-hybrid-paper-cap",
+        retrieval_mode="hybrid",
+        paper_cap=3,
+    )
+    config = _suite_config(settings=[setting])
+    item = build_benchmark_run_config(config, config.datasets[0], config.settings[0])
+
+    assert item.retrieval.paper_cap == 3
 
 
 def test_run_benchmark_suite_runs_items_and_writes_stable_summary(

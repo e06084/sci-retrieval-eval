@@ -202,6 +202,7 @@ def build_benchmark_run_config(
         rerank_enabled=setting.rerank_enabled,
         hybrid_per_source_topk=setting.hybrid_per_source_topk,
         rrf_path_topk=setting.rrf_path_topk,
+        paper_cap=setting.paper_cap,
         rerank_cross_path_topk=setting.rerank_cross_path_topk,
         rerank_candidate_cap=setting.rerank_candidate_cap,
         created_by=suite_config.created_by,

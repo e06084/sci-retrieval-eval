@@ -20,6 +20,7 @@ from eval_platform.datasets import (
 )
 from eval_platform.defaults import (
     DEFAULT_HYBRID_PER_SOURCE_TOPK,
+    DEFAULT_PAPER_CAP,
     DEFAULT_RERANK_CANDIDATE_CAP,
     DEFAULT_RERANK_CROSS_PATH_TOPK,
     DEFAULT_RETRIEVAL_TOP_K,
@@ -38,7 +39,11 @@ from eval_platform.retrieval.clients import (
     RewriteClient,
 )
 from eval_platform.retrieval.errors import RetrievalRunError
-from eval_platform.retrieval.fusion import dedupe_by_chunk_id, dedupe_sequential
+from eval_platform.retrieval.fusion import (
+    dedupe_by_chunk_id,
+    dedupe_sequential,
+    limit_hits_per_paper,
+)
 from eval_platform.retrieval.query_paths import embed_query_paths, resolve_query_paths
 from eval_platform.retrieval.recall import recall_one
 from eval_platform.retrieval.replay import run_retrieval_replay
@@ -82,6 +87,7 @@ class RetrievalRunConfig(BaseModel):
     rerank_enabled: bool = False
     hybrid_per_source_topk: int = Field(default=DEFAULT_HYBRID_PER_SOURCE_TOPK, gt=0)
     rrf_path_topk: int = Field(default=DEFAULT_RRF_PATH_TOPK, gt=0)
+    paper_cap: int = Field(default=DEFAULT_PAPER_CAP, ge=0)
     rerank_cross_path_topk: int = Field(default=DEFAULT_RERANK_CROSS_PATH_TOPK, ge=0)
     rerank_candidate_cap: int = Field(default=DEFAULT_RERANK_CANDIDATE_CAP, ge=0)
 
@@ -334,7 +340,16 @@ def _retrieve_one_query(
         candidates = dedupe_sequential(hit_lists, max_total=250)
         trace["fused_hits"] = hits_trace(candidates)
 
-    final_hits = maybe_rerank(query_text, candidates, config, rerank_client, trace)
+    if config.retrieval_mode == "hybrid":
+        capped_candidates = limit_hits_per_paper(
+            candidates,
+            paper_cap=config.paper_cap,
+            max_total=config.rrf_path_topk,
+        )
+    else:
+        capped_candidates = candidates
+    trace["paper_capped_hits"] = hits_trace(capped_candidates)
+    final_hits = maybe_rerank(query_text, capped_candidates, config, rerank_client, trace)
     ranked_hits = rank_hits(final_hits[: config.top_k])
     trace["final_hits"] = hits_trace(ranked_hits)
     return RetrievalQueryResult(
@@ -369,6 +384,7 @@ def _build_manifest_metadata(
             "rerank_enabled": config.rerank_enabled,
             "hybrid_per_source_topk": config.hybrid_per_source_topk,
             "rrf_path_topk": config.rrf_path_topk,
+            "paper_cap": config.paper_cap,
             "rerank_cross_path_topk": config.rerank_cross_path_topk,
             "rerank_candidate_cap": config.rerank_candidate_cap,
             "index_name": config.index_name,
@@ -455,6 +471,7 @@ def _retrieval_asset_fingerprint_components(
             "fusion": {
                 "method": "rrf" if config.retrieval_mode == "hybrid" else None,
                 "path_topk": config.rrf_path_topk,
+                "paper_cap": config.paper_cap,
             },
         },
         rewrite=_optional_mapping(metadata.get("rewrite"))

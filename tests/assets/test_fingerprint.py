@@ -713,6 +713,18 @@ def test_changing_retrieval_params_changes_retrieval_fingerprint() -> None:
     assert base.sha256 != changed_trace.sha256
 
 
+def test_retrieval_fingerprint_changes_when_paper_cap_changes() -> None:
+    base = _fingerprint("retrieval_run", _retrieval_components())
+    changed_paper_cap = _fingerprint(
+        "retrieval_run",
+        _retrieval_components(
+            search_params={"fusion": {"method": "rrf", "path_topk": 25, "paper_cap": 1}}
+        ),
+    )
+
+    assert base.sha256 != changed_paper_cap.sha256
+
+
 def test_changing_metric_params_changes_metrics_but_not_retrieval_fingerprint() -> None:
     retrieval = _fingerprint("retrieval_run", _retrieval_components())
     metrics_a = _fingerprint(

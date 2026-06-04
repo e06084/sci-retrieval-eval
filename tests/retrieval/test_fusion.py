@@ -1,6 +1,7 @@
 """Tests for retrieval fusion helpers."""
 
 from eval_platform.retrieval import RetrievalHit, rrf_fuse
+from eval_platform.retrieval.fusion import limit_hits_per_paper
 
 
 def test_rrf_fuse_merges_sources_and_origin_scores() -> None:
@@ -30,3 +31,19 @@ def test_rrf_fuse_tie_breaks_by_chunk_id() -> None:
     )
 
     assert [hit.chunk_id for hit in fused] == ["a", "b"]
+
+
+def test_limit_hits_per_paper_uses_metadata_paper_id_then_doc_id_then_chunk_id() -> None:
+    hits = [
+        RetrievalHit(chunk_id="c1", doc_id="doc-a", metadata={"paper_id": "paper-1"}),
+        RetrievalHit(chunk_id="c2", doc_id="doc-b", metadata={"paper_id": "paper-1"}),
+        RetrievalHit(chunk_id="c3", doc_id="doc-2"),
+        RetrievalHit(chunk_id="c4", doc_id="doc-2"),
+        RetrievalHit(chunk_id="c5", doc_id="", metadata={}),
+        RetrievalHit(chunk_id="c5", doc_id="", metadata={}),
+        RetrievalHit(chunk_id="c6", doc_id="", metadata={}),
+    ]
+
+    limited = limit_hits_per_paper(hits, paper_cap=1, max_total=10)
+
+    assert [hit.chunk_id for hit in limited] == ["c1", "c3", "c5", "c6"]

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 from eval_platform.retrieval.schema import RetrievalHit
 
 
@@ -76,6 +78,32 @@ def dedupe_by_chunk_id(hits: list[RetrievalHit]) -> list[RetrievalHit]:
     return out
 
 
+def limit_hits_per_paper(
+    hits: list[RetrievalHit],
+    *,
+    paper_cap: int,
+    max_total: int,
+) -> list[RetrievalHit]:
+    """Keep ranked hits while capping max chunks per paper/doc id."""
+
+    if paper_cap <= 0:
+        return list(hits)
+    if max_total <= 0:
+        return []
+
+    out: list[RetrievalHit] = []
+    counts: defaultdict[str, int] = defaultdict(int)
+    for hit in hits:
+        paper_id = _paper_id_for_hit(hit)
+        if counts[paper_id] >= paper_cap:
+            continue
+        counts[paper_id] += 1
+        out.append(hit)
+        if len(out) >= max_total:
+            break
+    return out
+
+
 def _first_ranks(chunk_ids: list[str]) -> dict[str, int]:
     ranks: dict[str, int] = {}
     for rank, chunk_id in enumerate(chunk_ids, start=1):
@@ -83,6 +111,16 @@ def _first_ranks(chunk_ids: list[str]) -> dict[str, int]:
         if normalized and normalized not in ranks:
             ranks[normalized] = rank
     return ranks
+
+
+def _paper_id_for_hit(hit: RetrievalHit) -> str:
+    metadata = hit.metadata or {}
+    value = metadata.get("paper_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if hit.doc_id.strip():
+        return hit.doc_id.strip()
+    return hit.chunk_id.strip()
 
 
 def _coalesce_hits(

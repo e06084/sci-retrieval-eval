@@ -409,6 +409,138 @@ def test_run_retrieval_rerank_caps_head_and_preserves_tail(
     ]
 
 
+def test_run_retrieval_paper_cap_zero_preserves_default_behavior(
+    store: LocalArtifactStore,
+) -> None:
+    base_es = FakeElasticsearchClient()
+    base_embedding = FakeEmbeddingClient()
+    base_milvus = FakeMilvusClient()
+    run_retrieval(
+        store,
+        store,
+        _config(output_artifact_id="no-cap", retrieval_mode="hybrid"),
+        es_client=base_es,
+        embedding_client=base_embedding,
+        milvus_client=base_milvus,
+    )
+    base_records = read_retrieval_run_artifact(store, "no-cap")
+
+    cap_es = FakeElasticsearchClient()
+    cap_embedding = FakeEmbeddingClient()
+    cap_milvus = FakeMilvusClient()
+    run_retrieval(
+        store,
+        store,
+        _config(output_artifact_id="zero-cap", retrieval_mode="hybrid", paper_cap=0),
+        es_client=cap_es,
+        embedding_client=cap_embedding,
+        milvus_client=cap_milvus,
+    )
+    cap_records = read_retrieval_run_artifact(store, "zero-cap")
+
+    assert [record.model_dump(mode="json") for record in cap_records] == [
+        record.model_dump(mode="json") for record in base_records
+    ]
+
+
+def test_run_retrieval_paper_cap_limits_chunks_per_doc_before_rerank(
+    store: LocalArtifactStore,
+) -> None:
+    class RepeatedDocESClient(FakeElasticsearchClient):
+        def search_bm25(self, index_name: str, query: str, top_k: int) -> list[RetrievalHit]:
+            rows = [
+                RetrievalHit(
+                    chunk_id="es-a1",
+                    doc_id="doc-a",
+                    text="a1",
+                    score=10.0,
+                    recall_source="es",
+                ),
+                RetrievalHit(
+                    chunk_id="es-b1",
+                    doc_id="doc-b",
+                    text="b1",
+                    score=9.0,
+                    recall_source="es",
+                ),
+                RetrievalHit(
+                    chunk_id="es-c1",
+                    doc_id="doc-c",
+                    text="c1",
+                    score=8.0,
+                    recall_source="es",
+                ),
+            ]
+            return rows[:top_k]
+
+        def enrich_by_chunk_ids(
+            self,
+            index_name: str,
+            hits: Sequence[RetrievalHit],
+        ) -> list[RetrievalHit]:
+            return list(hits)
+
+    class RepeatedDocMilvusClient(FakeMilvusClient):
+        def search(
+            self,
+            collection_name: str,
+            vector: Sequence[float],
+            top_k: int,
+        ) -> list[RetrievalHit]:
+            rows = [
+                RetrievalHit(
+                    chunk_id="mv-a1",
+                    doc_id="doc-a",
+                    score=1.0,
+                    recall_source="milvus",
+                ),
+                RetrievalHit(
+                    chunk_id="mv-a2",
+                    doc_id="doc-a",
+                    score=0.9,
+                    recall_source="milvus",
+                ),
+                RetrievalHit(
+                    chunk_id="mv-b1",
+                    doc_id="doc-b",
+                    score=0.8,
+                    recall_source="milvus",
+                ),
+            ]
+            return rows[:top_k]
+
+    rerank = FakeRerankClient()
+    run_retrieval(
+        store,
+        store,
+        _config(
+            output_artifact_id="paper-cap-rerank",
+            retrieval_mode="hybrid",
+            top_k=3,
+            hybrid_per_source_topk=3,
+            rrf_path_topk=3,
+            paper_cap=1,
+            rerank_enabled=True,
+            rerank_candidate_cap=3,
+            rerank_cross_path_topk=3,
+        ),
+        es_client=RepeatedDocESClient(),
+        embedding_client=FakeEmbeddingClient(),
+        milvus_client=RepeatedDocMilvusClient(),
+        rerank_client=rerank,
+    )
+    records = read_retrieval_run_artifact(store, "paper-cap-rerank")
+    trace = records[0].trace
+
+    assert trace is not None
+    capped_doc_ids = [row["doc_id"] for row in trace["paper_capped_hits"]]
+    rerank_input_doc_ids = [row["doc_id"] for row in trace["rerank_input"]]
+    assert capped_doc_ids == rerank_input_doc_ids
+    assert len(capped_doc_ids) == len(set(capped_doc_ids))
+    assert "doc-a" in capped_doc_ids
+    assert "doc-b" in capped_doc_ids
+
+
 def test_run_retrieval_rerank_enabled_with_http_rerank_client(
     store: LocalArtifactStore,
 ) -> None:

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from eval_platform.defaults import (
     DEFAULT_HYBRID_PER_SOURCE_TOPK,
+    DEFAULT_PAPER_CAP,
     DEFAULT_RERANK_CANDIDATE_CAP,
     DEFAULT_RERANK_CROSS_PATH_TOPK,
     DEFAULT_RETRIEVAL_TOP_K,
@@ -33,6 +34,7 @@ class BenchmarkSettingSpec(BaseModel):
     top_k: int = Field(default=DEFAULT_RETRIEVAL_TOP_K, gt=0)
     hybrid_per_source_topk: int = Field(default=DEFAULT_HYBRID_PER_SOURCE_TOPK, gt=0)
     rrf_path_topk: int = Field(default=DEFAULT_RRF_PATH_TOPK, gt=0)
+    paper_cap: int = Field(default=DEFAULT_PAPER_CAP, ge=0)
     rerank_cross_path_topk: int = Field(default=DEFAULT_RERANK_CROSS_PATH_TOPK, ge=0)
     rerank_candidate_cap: int = Field(default=DEFAULT_RERANK_CANDIDATE_CAP, ge=0)
     trace_mode: Literal["replay", "none"] = "replay"
