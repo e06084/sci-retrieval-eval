@@ -6,11 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, LocalArtifactStore
-from eval_platform.artifacts.types import (
-    ELASTICSEARCH_INDEX_ARTIFACT_TYPE,
-    MILVUS_COLLECTION_ARTIFACT_TYPE,
-)
+from eval_platform.artifacts import LocalArtifactStore
 from eval_platform.datasets import (
     CorpusRecord,
     NormalizedDataset,
@@ -18,7 +14,6 @@ from eval_platform.datasets import (
     QueryRecord,
     write_normalized_dataset_artifact,
 )
-from eval_platform.retrieval import RetrievalHit, RetrievalQueryResult, write_retrieval_run_artifact
 from eval_platform.experiments.runner import (
     _compute_recall_inf_metrics,
     _mean,
@@ -27,6 +22,7 @@ from eval_platform.experiments.runner import (
     _trace_doc_ids,
     _trace_hit_doc_id,
 )
+from eval_platform.retrieval import RetrievalHit, RetrievalQueryResult, write_retrieval_run_artifact
 
 
 class TestTraceHitDocId:
