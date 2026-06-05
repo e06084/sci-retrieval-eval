@@ -55,12 +55,12 @@ from eval_platform.metrics import (
     run_metrics,
 )
 from eval_platform.retrieval import (
+    RESULTS_DIR,
     ElasticsearchRetrievalClient,
     MilvusRetrievalClient,
     RerankClient,
     RewriteClient,
     build_retrieval_run_fingerprint_sha256,
-    read_retrieval_run_artifact,
     run_retrieval,
 )
 
@@ -299,13 +299,9 @@ def _compute_recall_inf_metrics(
     source_normalized_dataset_artifact_id: str,
     retrieval_run_artifact_id: str,
 ) -> dict[str, float]:
+    """Compute recall@inf metrics by streaming retrieval shards to minimize memory."""
     try:
         dataset = read_normalized_dataset_artifact(store, source_normalized_dataset_artifact_id)
-        retrieval_records = read_retrieval_run_artifact(
-            store,
-            retrieval_run_artifact_id,
-            include_trace=True,
-        )
     except Exception:
         return {}
 
@@ -317,29 +313,26 @@ def _compute_recall_inf_metrics(
     if not qrels_by_query:
         return {}
 
-    records_by_query_id = {record.query_id: record for record in retrieval_records}
+    try:
+        doc_id_sets = _stream_retrieval_doc_ids(store, retrieval_run_artifact_id)
+    except Exception:
+        return {}
+
     es_inf: list[float] = []
     milvus_inf: list[float] = []
     rrf_inf: list[float] = []
     rrf_es_inf: list[float] = []
     rrf_milvus_inf: list[float] = []
     for query_id, relevant_docs in sorted(qrels_by_query.items()):
-        record = records_by_query_id.get(query_id)
-        if record is None or record.error:
+        entry = doc_id_sets.get(query_id)
+        if entry is None:
             es_inf.append(0.0)
             milvus_inf.append(0.0)
             rrf_inf.append(0.0)
             rrf_es_inf.append(0.0)
             rrf_milvus_inf.append(0.0)
             continue
-        trace = record.trace if isinstance(record.trace, dict) else {}
-        es_docs = _trace_doc_ids(trace, "es_hits")
-        milvus_docs = _trace_doc_ids(trace, "milvus_hits")
-        rrf_docs = _trace_doc_ids(trace, "paper_capped_hits")
-        if not rrf_docs:
-            rrf_docs = _trace_doc_ids(trace, "fused_hits")
-        if not rrf_docs:
-            rrf_docs = _record_doc_ids(record.hits)
+        es_docs, milvus_docs, rrf_docs = entry
         es_inf.append(_recall_inf(es_docs, relevant_docs))
         milvus_inf.append(_recall_inf(milvus_docs, relevant_docs))
         rrf_inf.append(_recall_inf(rrf_docs, relevant_docs))
@@ -352,6 +345,66 @@ def _compute_recall_inf_metrics(
         "rrf_intersect_es_recall_at_inf": _mean(rrf_es_inf),
         "rrf_intersect_milvus_recall_at_inf": _mean(rrf_milvus_inf),
     }
+
+
+def _stream_retrieval_doc_ids(
+    store: ArtifactStore,
+    retrieval_run_artifact_id: str,
+) -> dict[str, tuple[set[str], set[str], set[str]]]:
+    """Stream retrieval shards and extract only doc_id sets per query.
+
+    Returns {query_id: (es_docs, milvus_docs, rrf_docs)}.
+    Peak memory is proportional to one shard + the accumulated doc_id sets.
+    """
+    import json as _json
+
+    if not store.is_complete(RETRIEVAL_RUN_ARTIFACT_TYPE, retrieval_run_artifact_id):
+        return {}
+
+    manifest = store.read_manifest(RETRIEVAL_RUN_ARTIFACT_TYPE, retrieval_run_artifact_id)
+    result: dict[str, tuple[set[str], set[str], set[str]]] = {}
+
+    for artifact_file in manifest.files:
+        if not artifact_file.path.startswith(f"{RESULTS_DIR}/"):
+            continue
+        payload = store.get_file(
+            RETRIEVAL_RUN_ARTIFACT_TYPE,
+            retrieval_run_artifact_id,
+            artifact_file.path,
+        ).decode("utf-8")
+        for line in payload.splitlines():
+            if not line.strip():
+                continue
+            record = _json.loads(line)
+            query_id = record.get("query_id", "")
+            if not query_id:
+                continue
+            if record.get("error"):
+                continue
+            trace = record.get("trace")
+            trace = trace if isinstance(trace, dict) else {}
+            es_docs = _trace_doc_ids(trace, "es_hits")
+            milvus_docs = _trace_doc_ids(trace, "milvus_hits")
+            rrf_docs = _trace_doc_ids(trace, "paper_capped_hits")
+            if not rrf_docs:
+                rrf_docs = _trace_doc_ids(trace, "fused_hits")
+            if not rrf_docs:
+                rrf_docs = _record_doc_ids_from_raw(record.get("hits") or [])
+            result[query_id] = (es_docs, milvus_docs, rrf_docs)
+        del payload
+    return result
+
+
+def _record_doc_ids_from_raw(hits: list[Any]) -> set[str]:
+    """Extract doc_ids from raw JSON hit dicts (not pydantic objects)."""
+    out: set[str] = set()
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        doc_id = _trace_hit_doc_id(hit)
+        if doc_id:
+            out.add(doc_id)
+    return out
 
 
 def _trace_doc_ids(trace: dict[str, Any], key: str) -> set[str]:
