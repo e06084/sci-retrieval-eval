@@ -93,6 +93,8 @@ def _retrieval_config(**overrides: Any) -> RetrievalRunConfig:
         "index_name": "chunks-index",
     }
     payload.update(overrides)
+    if payload.get("execution_mode") == "replay" and "trace_mode" not in overrides:
+        payload["trace_mode"] = "replay"
     return RetrievalRunConfig(**payload)
 
 

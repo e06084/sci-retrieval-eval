@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from eval_platform.retrieval.clients import RerankClient
@@ -21,6 +22,7 @@ def maybe_rerank(
     config: RerankFlowConfig,
     rerank_client: RerankClient | None,
     trace: dict[str, Any],
+    hits_fn: Callable[[list[RetrievalHit]], list[dict[str, Any]]] | None = None,
 ) -> list[RetrievalHit]:
     """Optionally rerank the highest-scoring candidate head and preserve the tail."""
 
@@ -28,6 +30,7 @@ def maybe_rerank(
         return candidates
     if rerank_client is None:
         raise RetrievalRunError("rerank_client is required when rerank_enabled=True")
+    _serialize = hits_fn or (lambda hits: [h.model_dump(mode="json") for h in hits])
     ordered = sorted(candidates, key=lambda hit: (-hit.score, hit.chunk_id))
     head = (
         ordered[: config.rerank_candidate_cap]
@@ -35,10 +38,10 @@ def maybe_rerank(
         else ordered
     )
     tail = ordered[len(head) :]
-    trace["rerank_input"] = [hit.model_dump(mode="json") for hit in head]
+    trace["rerank_input"] = _serialize(head)
     top_n = config.rerank_cross_path_topk if config.rerank_cross_path_topk > 0 else len(head)
     reranked = rerank_client.rerank(query_text, head, top_n)
-    trace["rerank_hits"] = [hit.model_dump(mode="json") for hit in reranked]
+    trace["rerank_hits"] = _serialize(reranked)
     reranked_ids = {hit.chunk_id for hit in reranked}
     return list(reranked) + [hit for hit in tail if hit.chunk_id not in reranked_ids]
 

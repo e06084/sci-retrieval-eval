@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import ctypes
+import gc
+import hashlib as _hashlib
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
-from eval_platform.artifacts import ArtifactDependency, ArtifactManifest, ArtifactStore
+from eval_platform.artifacts import (
+    ArtifactDependency,
+    ArtifactFile,
+    ArtifactManifest,
+    ArtifactStore,
+)
 from eval_platform.assets import (
     add_asset_fingerprint_metadata,
     build_asset_fingerprint,
@@ -28,10 +37,7 @@ from eval_platform.defaults import (
 )
 from eval_platform.embeddings import EmbeddingClient
 from eval_platform.indexes import ELASTICSEARCH_INDEX_ARTIFACT_TYPE, MILVUS_COLLECTION_ARTIFACT_TYPE
-from eval_platform.retrieval.artifact import (
-    RETRIEVAL_RUN_ARTIFACT_TYPE,
-    write_retrieval_run_artifact,
-)
+from eval_platform.retrieval.artifact import RETRIEVAL_RUN_ARTIFACT_TYPE
 from eval_platform.retrieval.clients import (
     ElasticsearchRetrievalClient,
     MilvusRetrievalClient,
@@ -44,6 +50,7 @@ from eval_platform.retrieval.fusion import (
     dedupe_sequential,
     limit_hits_per_paper,
 )
+from eval_platform.retrieval.jsonl import dump_retrieval_results_jsonl
 from eval_platform.retrieval.query_paths import embed_query_paths, resolve_query_paths
 from eval_platform.retrieval.recall import recall_one
 from eval_platform.retrieval.replay import run_retrieval_replay
@@ -53,8 +60,18 @@ from eval_platform.retrieval.trace import (
     append_recall_trace,
     build_error_trace,
     hits_trace,
+    hits_trace_light,
     new_live_trace,
 )
+
+
+def _release_memory() -> None:
+    """Force Python and glibc to return freed memory to the OS."""
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
 
 
 def _non_empty_string(value: str, field_name: str) -> str:
@@ -71,8 +88,8 @@ class RetrievalRunConfig(BaseModel):
     retrieval_mode: Literal["es", "milvus", "hybrid"] = "hybrid"
     top_k: int = Field(default=DEFAULT_RETRIEVAL_TOP_K, gt=0)
     query_limit: int | None = Field(default=None, gt=0)
-    queries_per_shard: int = Field(default=1000, gt=0)
-    trace_mode: Literal["replay", "none"] = "replay"
+    queries_per_shard: int = Field(default=50, gt=0)
+    trace_mode: Literal["replay", "light", "none"] = "light"
     execution_mode: Literal["live", "replay"] = "live"
     replay_source_retrieval_run_artifact_id: str | None = None
 
@@ -192,12 +209,16 @@ def run_retrieval(
         message="Starting retrieval queries",
         metadata=_progress_metadata(config),
     )
-    results: list[RetrievalQueryResult] = []
+    shard_buffer: list[RetrievalQueryResult] = []
     failed_query_count = 0
+    shard_index = 0
+    files: list[ArtifactFile] = []
+    total_record_count = 0
+
     for query_index, query in enumerate(queries, start=1):
         query_error: str | None = None
         try:
-            results.append(
+            shard_buffer.append(
                 _retrieve_one_query(
                     query_id=query.query_id,
                     query_text=query.text,
@@ -212,14 +233,14 @@ def run_retrieval(
         except Exception as exc:
             query_error = str(exc)
             failed_query_count += 1
-            results.append(
+            shard_buffer.append(
                 RetrievalQueryResult(
                     query_id=query.query_id,
                     query_text=query.text,
                     hits=[],
                     trace=(
                         build_error_trace(query.text, exc)
-                        if config.trace_mode == "replay"
+                        if config.trace_mode != "none"
                         else None
                     ),
                     error=query_error,
@@ -238,18 +259,65 @@ def run_retrieval(
                 "query_error": query_error,
             },
         )
+        if len(shard_buffer) >= config.queries_per_shard:
+            files.append(
+                _flush_shard(output_store, config.output_artifact_id, shard_index, shard_buffer)
+            )
+            total_record_count += len(shard_buffer)
+            shard_index += 1
+            shard_buffer = []
+            _release_memory()
+
+    if shard_buffer:
+        files.append(
+            _flush_shard(output_store, config.output_artifact_id, shard_index, shard_buffer)
+        )
+        total_record_count += len(shard_buffer)
+        shard_buffer = []
+        _release_memory()
 
     metadata = _build_manifest_metadata(config, source_store=source_store)
-    return write_retrieval_run_artifact(
-        output_store,
-        config.output_artifact_id,
-        results,
-        queries_per_shard=config.queries_per_shard,
-        metadata=metadata,
-        dependencies=_build_dependencies(config),
+    succeeded_query_count = total_record_count - failed_query_count
+    manifest_metadata = {
+        key: value
+        for key, value in metadata.items()
+        if key
+        not in {
+            "stage",
+            "query_count",
+            "succeeded_query_count",
+            "failed_query_count",
+            "queries_per_shard",
+            "result_file_count",
+            "result_record_count",
+        }
+    }
+    manifest_metadata.update(
+        {
+            "stage": "retrieval_run",
+            "query_count": total_record_count,
+            "succeeded_query_count": succeeded_query_count,
+            "failed_query_count": failed_query_count,
+            "queries_per_shard": config.queries_per_shard,
+            "result_file_count": len(files),
+            "result_record_count": total_record_count,
+        }
+    )
+    manifest = ArtifactManifest(
+        artifact_id=config.output_artifact_id,
+        artifact_type=RETRIEVAL_RUN_ARTIFACT_TYPE,
+        created_at=datetime.now(UTC),
         created_by=config.created_by,
         code_git_sha=config.code_git_sha,
+        dependencies=_build_dependencies(config),
+        metadata=manifest_metadata,
+        files=files,
     )
+    output_store.write_manifest(
+        RETRIEVAL_RUN_ARTIFACT_TYPE, config.output_artifact_id, manifest
+    )
+    output_store.mark_success(RETRIEVAL_RUN_ARTIFACT_TYPE, config.output_artifact_id)
+    return manifest
 
 
 def build_retrieval_run_fingerprint_sha256(
@@ -308,6 +376,7 @@ def _retrieve_one_query(
     vectors = embed_query_paths(queries, config, embedding_client)
     hit_lists: list[list[RetrievalHit]] = []
     trace, per_query_trace = new_live_trace(queries)
+    _hits_fn = hits_trace if config.trace_mode == "replay" else hits_trace_light
 
     for index, query in enumerate(queries):
         hits, es_hits, milvus_hits, fused_hits = recall_one(
@@ -325,6 +394,7 @@ def _retrieve_one_query(
             es_hits=es_hits,
             milvus_hits=milvus_hits,
             fused_hits=fused_hits,
+            hits_fn=_hits_fn,
         )
 
     if len(hit_lists) == 1:
@@ -335,10 +405,10 @@ def _retrieve_one_query(
         trace["fused_hits"] = single_trace["fused_hits"]
     elif config.rerank_enabled:
         candidates = dedupe_by_chunk_id([hit for hits in hit_lists for hit in hits])
-        trace["fused_hits"] = hits_trace(candidates)
+        trace["fused_hits"] = _hits_fn(candidates)
     else:
         candidates = dedupe_sequential(hit_lists, max_total=250)
-        trace["fused_hits"] = hits_trace(candidates)
+        trace["fused_hits"] = _hits_fn(candidates)
 
     if config.retrieval_mode == "hybrid":
         capped_candidates = limit_hits_per_paper(
@@ -348,17 +418,54 @@ def _retrieve_one_query(
         )
     else:
         capped_candidates = candidates
-    trace["paper_capped_hits"] = hits_trace(capped_candidates)
-    final_hits = maybe_rerank(query_text, capped_candidates, config, rerank_client, trace)
+    trace["paper_capped_hits"] = _hits_fn(capped_candidates)
+    final_hits = maybe_rerank(
+        query_text, capped_candidates, config, rerank_client, trace, hits_fn=_hits_fn
+    )
     ranked_hits = rank_hits(final_hits[: config.top_k])
-    trace["final_hits"] = hits_trace(ranked_hits)
+    trace["final_hits"] = _hits_fn(ranked_hits)
     return RetrievalQueryResult(
         query_id=query_id,
         query_text=query_text,
         hits=ranked_hits,
-        trace=trace if config.trace_mode == "replay" else None,
+        trace=trace if config.trace_mode != "none" else None,
         error=None,
     )
+
+
+_RESULTS_DIR = "results"
+
+
+def _flush_shard(
+    store: ArtifactStore,
+    artifact_id: str,
+    shard_index: int,
+    records: list[RetrievalQueryResult],
+    *,
+    strip_hit_text: bool = True,
+) -> ArtifactFile:
+    """Write one shard of retrieval results and return its file metadata."""
+    if strip_hit_text:
+        records = [_strip_record_text(r) for r in records]
+    payload = dump_retrieval_results_jsonl(records).encode("utf-8")
+    path = f"{_RESULTS_DIR}/part-{shard_index:05d}.jsonl"
+    store.put_file(RETRIEVAL_RUN_ARTIFACT_TYPE, artifact_id, path, payload)
+    return ArtifactFile(
+        path=path,
+        size_bytes=len(payload),
+        sha256=_hashlib.sha256(payload).hexdigest(),
+    )
+
+
+def _strip_record_text(record: RetrievalQueryResult) -> RetrievalQueryResult:
+    """Remove bulky text/title from hits to reduce artifact size and memory on read-back."""
+    if not record.hits:
+        return record
+    stripped_hits = [
+        hit.model_copy(update={"text": "", "title": None}) for hit in record.hits
+    ]
+    return record.model_copy(update={"hits": stripped_hits})
+
 
 
 def _build_manifest_metadata(

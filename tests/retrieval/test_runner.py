@@ -201,6 +201,8 @@ def _config(**overrides: Any) -> RetrievalRunConfig:
         "rrf_path_topk": 2,
     }
     payload.update(overrides)
+    if payload.get("execution_mode") == "replay" and "trace_mode" not in overrides:
+        payload["trace_mode"] = "replay"
     return RetrievalRunConfig(**payload)
 
 
@@ -247,7 +249,7 @@ def test_run_retrieval_milvus_mode_embeds_searches_and_enriches(
     assert milvus.calls[0][0] == "chunks-collection"
     assert es.search_calls == []
     assert es.enrich_calls == [["mv-1", "mv-2"]]
-    assert records[0].hits[0].text == "text mv-1"
+    assert records[0].hits[0].text == ""  # text stripped from artifact
 
 
 def test_run_retrieval_hybrid_runs_rrf_and_enriches(store: LocalArtifactStore) -> None:
@@ -317,13 +319,14 @@ def test_run_retrieval_defaults_to_replay_trace(store: LocalArtifactStore) -> No
     )
     records = read_retrieval_run_artifact(store, "retrieval-1")
 
-    assert manifest.metadata["trace_mode"] == "replay"
+    assert manifest.metadata["trace_mode"] == "light"
     assert manifest.metadata["execution_mode"] == "live"
     assert "include_trace" not in manifest.metadata
     assert records[0].trace is not None
     assert records[0].trace["rewrite_queries"] == ["alpha query"]
     assert records[0].trace["per_query"][0]["es_hits"]
-    assert [hit["rank"] for hit in records[0].trace["final_hits"]] == [1, 2]
+    assert len(records[0].trace["final_hits"]) == 2
+    assert all("doc_id" in hit for hit in records[0].trace["final_hits"])
 
 
 def test_run_retrieval_trace_mode_none_omits_trace(store: LocalArtifactStore) -> None:

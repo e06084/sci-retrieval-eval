@@ -13,6 +13,12 @@ def hits_trace(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
     return [hit.model_dump(mode="json") for hit in hits]
 
 
+def hits_trace_light(hits: list[RetrievalHit]) -> list[dict[str, str]]:
+    """Serialize hits keeping only doc_id and chunk_id for recall@inf computation."""
+
+    return [{"doc_id": hit.doc_id, "chunk_id": hit.chunk_id} for hit in hits]
+
+
 def new_live_trace(queries: list[str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Create a live query trace and return its mutable per-query list."""
 
@@ -33,15 +39,17 @@ def append_recall_trace(
     es_hits: list[RetrievalHit],
     milvus_hits: list[RetrievalHit],
     fused_hits: list[RetrievalHit],
+    hits_fn: object | None = None,
 ) -> None:
     """Append one query-path recall trace record."""
 
+    _serialize = hits_fn or hits_trace  # type: ignore[operator]
     per_query_trace.append(
         {
             "query": query,
-            "es_hits": hits_trace(es_hits),
-            "milvus_hits": hits_trace(milvus_hits),
-            "fused_hits": hits_trace(fused_hits),
+            "es_hits": _serialize(es_hits),
+            "milvus_hits": _serialize(milvus_hits),
+            "fused_hits": _serialize(fused_hits),
         }
     )
 
