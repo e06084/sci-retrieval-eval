@@ -59,8 +59,8 @@ from eval_platform.retrieval import (
     MilvusRetrievalClient,
     RerankClient,
     RewriteClient,
-    read_retrieval_run_artifact,
     build_retrieval_run_fingerprint_sha256,
+    read_retrieval_run_artifact,
     run_retrieval,
 )
 
