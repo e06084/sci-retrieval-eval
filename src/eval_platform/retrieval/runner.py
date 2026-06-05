@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import gc
 import hashlib as _hashlib
 from datetime import UTC, datetime
@@ -63,15 +62,6 @@ from eval_platform.retrieval.trace import (
     hits_trace_light,
     new_live_trace,
 )
-
-
-def _release_memory() -> None:
-    """Force Python and glibc to return freed memory to the OS."""
-    gc.collect()
-    try:
-        ctypes.CDLL("libc.so.6").malloc_trim(0)
-    except (OSError, AttributeError):
-        pass
 
 
 def _non_empty_string(value: str, field_name: str) -> str:
@@ -266,7 +256,7 @@ def run_retrieval(
             total_record_count += len(shard_buffer)
             shard_index += 1
             shard_buffer = []
-            _release_memory()
+            gc.collect()
 
     if shard_buffer:
         files.append(
@@ -274,7 +264,7 @@ def run_retrieval(
         )
         total_record_count += len(shard_buffer)
         shard_buffer = []
-        _release_memory()
+        gc.collect()
 
     metadata = _build_manifest_metadata(config, source_store=source_store)
     succeeded_query_count = total_record_count - failed_query_count
