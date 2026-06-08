@@ -37,7 +37,7 @@ class BenchmarkSettingSpec(BaseModel):
     paper_cap: int = Field(default=DEFAULT_PAPER_CAP, ge=0)
     rerank_cross_path_topk: int = Field(default=DEFAULT_RERANK_CROSS_PATH_TOPK, ge=0)
     rerank_candidate_cap: int = Field(default=DEFAULT_RERANK_CANDIDATE_CAP, ge=0)
-    trace_mode: Literal["replay", "light", "none"] = "light"
+    trace_mode: Literal["replay", "light", "none"] = "replay"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("setting_key")

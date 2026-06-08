@@ -40,6 +40,12 @@ def test_default_e1_e4_settings_order_and_values() -> None:
         0,
     ]
     assert [setting.paper_cap for setting in DEFAULT_E1_E4_SETTINGS] == [0, 0, 0, 0]
+    assert [setting.trace_mode for setting in DEFAULT_E1_E4_SETTINGS] == [
+        "replay",
+        "replay",
+        "replay",
+        "replay",
+    ]
 
 
 def test_benchmark_setting_spec_uses_sciverse_v1_defaults() -> None:
@@ -48,6 +54,7 @@ def test_benchmark_setting_spec_uses_sciverse_v1_defaults() -> None:
     assert setting.top_k == 100
     assert setting.rerank_candidate_cap == 0
     assert setting.paper_cap == 0
+    assert setting.trace_mode == "replay"
 
 
 def test_settings_for_selection_supports_all_and_keys() -> None:

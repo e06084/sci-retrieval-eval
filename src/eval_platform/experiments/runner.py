@@ -194,7 +194,7 @@ def run_experiment(
         aggregate_metrics = dict(benchmark_summary.aggregate_metrics)
         aggregate_metrics.update(
             _compute_recall_inf_metrics(
-                output_store,
+                read_store,
                 source_normalized_dataset_artifact_id=(
                     benchmark_summary.source_normalized_dataset_artifact_id
                 ),
@@ -300,10 +300,7 @@ def _compute_recall_inf_metrics(
     retrieval_run_artifact_id: str,
 ) -> dict[str, float]:
     """Compute recall@inf metrics by streaming retrieval shards to minimize memory."""
-    try:
-        dataset = read_normalized_dataset_artifact(store, source_normalized_dataset_artifact_id)
-    except Exception:
-        return {}
+    dataset = read_normalized_dataset_artifact(store, source_normalized_dataset_artifact_id)
 
     qrels_by_query: dict[str, set[str]] = {}
     for qrel in dataset.qrels:
@@ -313,10 +310,7 @@ def _compute_recall_inf_metrics(
     if not qrels_by_query:
         return {}
 
-    try:
-        doc_id_sets = _stream_retrieval_doc_ids(store, retrieval_run_artifact_id)
-    except Exception:
-        return {}
+    doc_id_sets = _stream_retrieval_doc_ids(store, retrieval_run_artifact_id)
 
     es_inf: list[float] = []
     milvus_inf: list[float] = []

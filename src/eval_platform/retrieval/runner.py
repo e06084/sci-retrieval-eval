@@ -78,8 +78,8 @@ class RetrievalRunConfig(BaseModel):
     retrieval_mode: Literal["es", "milvus", "hybrid"] = "hybrid"
     top_k: int = Field(default=DEFAULT_RETRIEVAL_TOP_K, gt=0)
     query_limit: int | None = Field(default=None, gt=0)
-    queries_per_shard: int = Field(default=50, gt=0)
-    trace_mode: Literal["replay", "light", "none"] = "light"
+    queries_per_shard: int = Field(default=1000, gt=0)
+    trace_mode: Literal["replay", "light", "none"] = "replay"
     execution_mode: Literal["live", "replay"] = "live"
     replay_source_retrieval_run_artifact_id: str | None = None
 

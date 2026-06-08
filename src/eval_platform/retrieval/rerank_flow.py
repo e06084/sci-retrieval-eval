@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any, Protocol
 
 from eval_platform.retrieval.clients import RerankClient
 from eval_platform.retrieval.errors import RetrievalRunError
 from eval_platform.retrieval.schema import RetrievalHit
+from eval_platform.retrieval.trace import HitsTraceFn
 
 
 class RerankFlowConfig(Protocol):
@@ -22,7 +22,7 @@ def maybe_rerank(
     config: RerankFlowConfig,
     rerank_client: RerankClient | None,
     trace: dict[str, Any],
-    hits_fn: Callable[[list[RetrievalHit]], list[dict[str, Any]]] | None = None,
+    hits_fn: HitsTraceFn | None = None,
 ) -> list[RetrievalHit]:
     """Optionally rerank the highest-scoring candidate head and preserve the tail."""
 

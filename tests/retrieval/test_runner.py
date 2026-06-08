@@ -180,10 +180,12 @@ def test_retrieval_run_config_uses_sciverse_v1_defaults() -> None:
     )
 
     assert config.top_k == 100
+    assert config.queries_per_shard == 1000
     assert config.hybrid_per_source_topk == 50
     assert config.rrf_path_topk == 25
     assert config.rerank_cross_path_topk == 50
     assert config.rerank_candidate_cap == 0
+    assert config.trace_mode == "replay"
 
 
 def _config(**overrides: Any) -> RetrievalRunConfig:
@@ -319,7 +321,7 @@ def test_run_retrieval_defaults_to_replay_trace(store: LocalArtifactStore) -> No
     )
     records = read_retrieval_run_artifact(store, "retrieval-1")
 
-    assert manifest.metadata["trace_mode"] == "light"
+    assert manifest.metadata["trace_mode"] == "replay"
     assert manifest.metadata["execution_mode"] == "live"
     assert "include_trace" not in manifest.metadata
     assert records[0].trace is not None

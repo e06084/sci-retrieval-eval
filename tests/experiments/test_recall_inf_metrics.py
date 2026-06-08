@@ -357,14 +357,14 @@ class TestComputeRecallInfMetrics:
         assert result["es_recall_at_inf"] == pytest.approx(0.0)
         assert result["milvus_recall_at_inf"] == pytest.approx(0.0)
 
-    def test_returns_empty_dict_when_artifact_missing(self, tmp_path: Path) -> None:
+    def test_raises_when_artifact_missing(self, tmp_path: Path) -> None:
         store = LocalArtifactStore(tmp_path)
-        result = _compute_recall_inf_metrics(
-            store,
-            source_normalized_dataset_artifact_id="nonexistent",
-            retrieval_run_artifact_id="nonexistent",
-        )
-        assert result == {}
+        with pytest.raises(Exception, match="Artifact is incomplete"):
+            _compute_recall_inf_metrics(
+                store,
+                source_normalized_dataset_artifact_id="nonexistent",
+                retrieval_run_artifact_id="nonexistent",
+            )
 
     def test_handles_error_queries(self, tmp_path: Path) -> None:
         store = LocalArtifactStore(tmp_path)

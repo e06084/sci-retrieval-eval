@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from eval_platform.retrieval.schema import RetrievalHit
+
+HitsTraceFn = Callable[[list[RetrievalHit]], list[dict[str, Any]]]
 
 
 def hits_trace(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
@@ -13,7 +16,7 @@ def hits_trace(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
     return [hit.model_dump(mode="json") for hit in hits]
 
 
-def hits_trace_light(hits: list[RetrievalHit]) -> list[dict[str, str]]:
+def hits_trace_light(hits: list[RetrievalHit]) -> list[dict[str, Any]]:
     """Serialize hits keeping only doc_id and chunk_id for recall@inf computation."""
 
     return [{"doc_id": hit.doc_id, "chunk_id": hit.chunk_id} for hit in hits]
@@ -39,11 +42,11 @@ def append_recall_trace(
     es_hits: list[RetrievalHit],
     milvus_hits: list[RetrievalHit],
     fused_hits: list[RetrievalHit],
-    hits_fn: object | None = None,
+    hits_fn: HitsTraceFn | None = None,
 ) -> None:
     """Append one query-path recall trace record."""
 
-    _serialize = hits_fn or hits_trace  # type: ignore[operator]
+    _serialize = hits_fn or hits_trace
     per_query_trace.append(
         {
             "query": query,

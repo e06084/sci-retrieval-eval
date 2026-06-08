@@ -145,6 +145,29 @@ def test_run_experiment_creates_missing_then_reuses_by_catalog(
     )
 
 
+def test_run_experiment_computes_recall_inf_with_split_source_output_stores(
+    tmp_path: Path,
+) -> None:
+    source_store = LocalArtifactStore(tmp_path / "source")
+    output_store = LocalArtifactStore(tmp_path / "output")
+    _write_small_dataset_and_assets(source_store)
+    es_client = FakeElasticsearchClient()
+
+    run_experiment(
+        source_store,
+        output_store,
+        _experiment_config("exp-split"),
+        es_client=es_client,
+    )
+    summary = read_experiment_run_artifact(output_store, "exp-split")
+    metrics = summary.items[0].aggregate_metrics
+
+    assert "es_recall_at_inf" in metrics
+    assert "milvus_recall_at_inf" in metrics
+    assert "rrf_recall_at_inf" in metrics
+    assert metrics["es_recall_at_inf"] == pytest.approx(1.0)
+
+
 def test_run_experiment_reuses_benchmark_without_recreating_child_stages(
     tmp_path: Path,
 ) -> None:
